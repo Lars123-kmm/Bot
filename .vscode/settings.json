@@ -1,0 +1,5 @@
+{
+  "python.defaultInterpreterPath": "C:\\Trading\\PythonWindows\\Finance\\Repo\\.venv\\Scripts\\python.exe",
+  "terminal.integrated.cwd": "C:\\Trading\\PythonWindows\\Finance\\Repo",
+  "python.analysis.extraPaths": ["C:\\Trading\\PythonWindows\\Finance\\Repo"]
+}

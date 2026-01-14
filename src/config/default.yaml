@@ -1,0 +1,32 @@
+# ---- Core ----
+symbol: "EURUSD"
+timeframe: "M15"
+timezone: "UTC"
+
+# ---- Data ----
+data:
+  bars: 5000
+
+# ---- Strategy: EMA + ATR ----
+strategy:
+  ema_fast: 20
+  ema_slow: 50
+  atr_period: 14
+  atr_stop_mult: 2.0
+  atr_tp_mult: 0.0          # 0.0 = kein fixes TP (optional)
+  signal_on_close: true     # Bar-close Signale (empfohlen)
+
+# ---- Risk ----
+risk:
+  account_risk_per_trade: 0.005
+  max_spread_atr_ratio: 0.15
+  max_daily_drawdown: 0.02
+  max_consecutive_losses: 5
+  cooldown_minutes: 30
+
+# ---- Execution (MT5) ----
+execution:
+  mode: "demo"              # demo | live
+  magic_number: 240101
+  slippage_points: 10
+  deviation_points: 20

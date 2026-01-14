@@ -1,0 +1,247 @@
+# MT5 Trading Bot – Trend (EMA + ATR) + TDA + ML (Python)
+
+Dieses Repository enthält ein vollständiges Trading-Framework für **MetaTrader 5 (MT5)** in **Python**
+Der Fokus des Systems liegt auf:
+
+- reproduzierbarer quantitativer Forschung  
+- zeitstabilen, realistischen Backtests  
+- kontrollierter Demo- und Live-Execution  
+- klarer Trennung zwischen Logik, Analyse und Ausführung  
+
+Das Framework kombiniert mehrere Ebenen der Entscheidungsfindung:
+
+- **EMA + ATR Trendstrategie** als deterministische Basissignale  
+- **Topologische Datenanalyse (TDA)** zur Marktstruktur- und Regime-Erkennung  
+- **Machine Learning (Meta-Labeling)** als Trade-Qualitäts- und Risiko-Filter  
+
+---
+
+## Inhaltsverzeichnis
+
+1. Überblick  
+2. Projektstruktur  
+3. Setup (VS Code, Python, MT5)  
+4. Datenmodell & Konventionen  
+5. Zentrale Indikatorlogik (`utils_indicators.py`)  
+6. Strategie A: EMA + ATR (Trend)  
+7. Strategie B: Topologische Datenanalyse (TDA)  
+8. Strategie C: Machine Learning (Meta-Labeling)  
+9. Backtesting-Methodik  
+10. Execution-Methodik (MT5)  
+11. Sicherheitsregeln & Failsafes  
+12. VS Code Workflow  
+13. Best Practices & Design-Prinzipien  
+14. Roadmap  
+15. Disclaimer  
+16. Erweiterte Architektur & neue Ideen (Appendix)  
+
+---
+
+## 1) Überblick
+
+Das Projekt ist **notebook-first** aufgebaut und folgt einem klaren Forschungs- und Produktionspfad:
+
+- **Research** → Hypothesen, Feature-Engineering, explorative Analyse  
+- **Backtesting** → zeitserienbasierte Validierung ohne Lookahead  
+- **Execution** → deterministische Orderausführung über MT5  
+
+Die Kernlogik ist strikt modularisiert:
+
+- **Alle Indikatoren und Features** befinden sich zentral in `utils_indicators.py`  
+- **Notebooks, Backtests und Live-Execution** verwenden exakt dieselbe Logik  
+- Es findet **keine Code-Duplikation** zwischen Research und Trading statt  
+
+Langfristiges Ziel ist die schrittweise **Migration der stabilisierten Notebook-Logik nach `src/`**
+für den dauerhaften Live-Betrieb.
+
+---
+
+## 16) Erweiterte Architektur & neue Ideen (Appendix)
+
+Dieser Abschnitt ergänzt die bestehende Roadmap um fortgeschrittene Konzepte zur:
+
+- Erhöhung der Zeitstabilität  
+- expliziten Marktregime-Erkennung  
+- Verbesserung der Signal- und Trade-Qualität  
+- professionellen Execution- und Risiko-Kontrolle  
+- sauberen Research- und Engineering-Disziplin  
+
+Alle beschriebenen Erweiterungen sind **vollständig kompatibel mit der bestehenden
+EMA + ATR + TDA + ML-Architektur** und vermeiden unnötige Komplexität oder
+architektonische Brüche.
+
+---
+
+## 16.1 Zeitstabilität & Backtest-Integrität
+
+### Walk-Forward & Purged Cross-Validation
+- Standardmethodik für alle ML- und Meta-Labeling-Komponenten  
+- Verhindert Label-Leakage bei überlappenden Trades  
+- Optional erweiterbar um Combinatorial Purged Cross-Validation (CPCV)  
+
+### Robuste Labeling-Methodik
+- Einsatz von **Triple-Barrier-Labeling**:
+  - obere und untere Barriere ATR-basiert  
+  - feste Zeitbarriere  
+- Stabilere und realistischere Labels als feste TP/SL-Definitionen  
+
+### Realistisches Kostenmodell
+- Spread  
+- Commission  
+- Slippage (volatilitäts- und sessionsabhängig)  
+- optionale Latency-Slippage (fix oder stochastisch)  
+
+### Anti-Overfitting-Metriken
+- Deflated Sharpe Ratio  
+- Probabilistic Sharpe Ratio  
+- Fokus auf Worst-Decile-Performance statt Durchschnittsoptimierung  
+
+---
+
+## 16.2 Marktregime & Struktur (TDA-Erweiterung)
+
+### TDA als Regime-Gate
+- TDA fungiert **nicht als Entry-Signal**, sondern als Struktur- und Regime-Filter  
+- Klassifikation z. B.: Trend / Chop / Übergang  
+- Aktiviert oder deaktiviert einzelne Strategiemodule  
+
+### Rolling-Window-TDA
+- Berechnung auf gleitenden Zeitfenstern  
+- Kombination mit Change-Point-Detection zur Erkennung von Regimewechseln  
+
+### Hybrid-Strukturfeatures
+Ergänzend zur TDA-Logik:
+- Hurst Exponent  
+- Autokorrelation der Returns  
+- Realized Volatility  
+- Trendpersistenz-Metriken  
+
+---
+
+## 16.3 Meta-Labeling als Decision Engine
+
+### Zwei-Stufen-Architektur
+1. **Base-Strategie (EMA + ATR)** bestimmt Richtung und Entry-Kandidaten  
+2. **Meta-Modell** bewertet Trade-Qualität und steuert Sizing  
+
+### Wahrscheinlichkeitsbasierte Entscheidungen
+- Kalibrierte Modellwahrscheinlichkeiten  
+- Mindest-Schwellen für Trade-Freigabe  
+- Positionsgröße proportional zum erwarteten Edge  
+
+### Utility- & Drawdown-sensitives Training
+- Asymmetrische Loss-Funktionen  
+- Optimierung auf Drawdown-Reduktion statt reine Accuracy  
+
+---
+
+## 16.4 Risiko- & Portfolio-Engine
+
+### Positions- und Portfolio-Risiko
+- ATR- oder Volatilitäts-basiertes Position Sizing  
+- Maximal-Exposure pro Symbol und Asset-Klasse  
+- optionale korrelationsbasierte Limits  
+
+### Failsafes & Kill-Switches
+- Daily Drawdown Limits  
+- Maximale Verlustserie  
+- Spread-Explosionen  
+- MT5-Disconnects oder Requote-Stürme  
+
+### Adaptive Recovery-Modi
+- Cooldown-Phasen nach Stressereignissen  
+- Reduziertes Risiko  
+- Handel nur noch mit A+-Setups  
+
+---
+
+## 16.5 Execution-Qualität (MT5)
+
+### Pre-Trade-Checks
+- Spread / ATR Filter  
+- Session-Filter (z. B. London / New York)  
+- News- und Event-Blackout-Zeiten  
+
+### Deterministische Order-State-Machine
+- Zustände: NEW → SENT → CONFIRMED → FILLED / PARTIAL → CLOSED  
+- Kontrollierte Retry-Logik  
+- Saubere Behandlung von Requotes und Partial-Fills  
+
+### Reconciliation
+- Abgleich interner Trade-Ledger mit MT5-Positions-Snapshots  
+- Broker gilt als Single Source of Truth  
+
+---
+
+## 16.6 Research- & Engineering-Workflow
+
+### Experiment-Tracking
+Speicherung von:
+- Daten-Hashes  
+- Feature-Code-Versionen  
+- Modellparametern  
+- Backtest-Konfigurationen  
+
+### Configuration-as-Code
+- Zentrale YAML/JSON-Konfiguration  
+- Identisch für:
+  - Research  
+  - Backtests  
+  - Demo- und Live-Execution  
+
+### Test-Suite
+- Unit-Tests für:
+  - Indikatoren (EMA, ATR)  
+  - Labeling-Logik  
+  - Lookahead-Freiheit  
+  - Execution-Adapter (Mock MT5)  
+
+---
+
+## 16.7 Kompatible Strategie-Erweiterungen
+
+- Breakout-Overlay für Chop-Regime  
+- Multi-Timeframe-Bestätigung (z. B. H1-Regime, M5-Entries)  
+- Alternative Trendstärke-Metriken (ADX, EMA-Slope / ATR)  
+- Dynamische No-Trade-Zonen (News, Spread-Spikes)  
+
+---
+
+## 16.8 Vorgeschlagene Modul-Erweiterung
+
+```text
+src/
+├── regime/        # TDA, Change Points, Regime-Gates
+├── risk/          # Position Sizing, Kill-Switches, Exposure-Management
+├── execution/     # Order-State-Machine, Reconciliation
+├── validation/    # Walk-Forward, Purged CV, Leakage-Tests
+├── experiments/   # Experiment-Tracking & Result-Registry
+
+repo/
+├── notebooks/
+├── src/
+│   ├── config/
+│   │   └── default.yaml
+│   ├── data/
+│   │   ├── mt5_fetch.py
+│   │   └── schema.py
+│   ├── features/
+│   │   └── indicators.py        # aus utils_indicators.py herausgelöst (oder wrapper)
+│   ├── strategies/
+│   │   └── ema_atr.py
+│   ├── backtest/
+│   │   ├── engine.py
+│   │   └── costs.py
+│   ├── execution/
+│   │   ├── mt5_broker.py
+│   │   ├── order_state.py
+│   │   └── trader.py
+│   ├── risk/
+│   │   ├── sizing.py
+│   │   └── guards.py
+│   └── common/
+│       ├── types.py
+│       ├── logging.py
+│       └── time.py
+├── tests/
+└── README.md
