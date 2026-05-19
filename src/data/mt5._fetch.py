@@ -7,7 +7,7 @@ import pandas as pd
 
 import MetaTrader5 as mt5
 
-from src.data.schema import to_utc_index, normalize_volume, validate_candles
+from src.data.schema import to_utc_datetime_index, normalize_volume_column, validate_candles
 
 
 @dataclass(frozen=True)
@@ -51,10 +51,10 @@ def fetch_rates(cfg: MT5FetchConfig) -> pd.DataFrame:
     df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
 
     # Index setzen + UTC erzwingen
-    df = to_utc_index(df, time_col="time")
+    df = to_utc_datetime_index(df, time_col="time")
 
     # Volume normalisieren
-    df = normalize_volume(df)
+    df = normalize_volume_column(df)
 
     # Optional: Spalten-Order (nur kosmetisch)
     # open/high/low/close/volume/spread/real_volume (falls du behalten willst)
