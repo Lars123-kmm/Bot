@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 _BASE = "https://fapi.binance.com"
 _MAX_RETRIES = 3
+_KLINE_LIMIT = 1500  # Binance max per request
+
+_INTERVAL_MAP = {
+    "M1": "1m", "M5": "5m", "M15": "15m", "M30": "30m",
+    "H1": "1h", "H4": "4h", "D1": "1d", "W1": "1w",
+    # also accept native strings
+    "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+    "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w",
+}
 
 
 def _get(url: str, params: dict) -> dict | list:
@@ -37,6 +46,75 @@ def _get(url: str, params: dict) -> dict | list:
 
 class BinanceFetcher:
     """Fetches public Binance Futures data — no API key required."""
+
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = "H1",
+        bars: int = 500,
+    ) -> pd.DataFrame:
+        """
+        Fetches recent closed OHLCV bars from Binance Futures public klines endpoint.
+        Automatically paginates when bars > 1500.
+        Drops the still-forming candle (last open bar).
+
+        Returns DataFrame with columns [open, high, low, close, volume],
+        DatetimeIndex in UTC.
+        """
+        interval = _INTERVAL_MAP.get(timeframe, timeframe)
+        all_rows: List[list] = []
+        end_ms: Optional[int] = None
+
+        remaining = bars
+        while remaining > 0:
+            limit = min(remaining, _KLINE_LIMIT)
+            params: Dict = {"symbol": symbol, "interval": interval, "limit": limit}
+            if end_ms is not None:
+                params["endTime"] = end_ms
+
+            try:
+                raw = _get(f"{_BASE}/fapi/v1/klines", params)
+            except Exception as exc:
+                logger.error("fetch_ohlcv failed (%s)", exc)
+                break
+
+            if not raw:
+                break
+
+            all_rows = list(raw) + all_rows
+            remaining -= len(raw)
+            # paginate backwards: next batch ends just before earliest bar
+            end_ms = int(raw[0][0]) - 1
+            if len(raw) < limit:
+                break
+
+        if not all_rows:
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+        df = pd.DataFrame(all_rows, columns=[
+            "open_time", "open", "high", "low", "close", "volume",
+            "close_time", "quote_vol", "n_trades",
+            "taker_base_vol", "taker_quote_vol", "ignore",
+        ])
+        df["open_time"] = pd.to_datetime(df["open_time"].astype(int), unit="ms", utc=True)
+        df["close_time"] = pd.to_datetime(df["close_time"].astype(int), unit="ms", utc=True)
+
+        for col in ("open", "high", "low", "close", "volume"):
+            df[col] = df[col].astype(float)
+
+        df = df.set_index("open_time").sort_index()
+        df = df[["open", "high", "low", "close", "volume"]]
+
+        # drop the forming (still-open) candle: its close_time is in the future
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        # rebuild close_time as Series aligned to df
+        close_times = pd.to_datetime(
+            [int(r[6]) for r in all_rows], unit="ms", utc=True
+        )
+        ct_series = pd.Series(close_times.values, index=df.index)
+        df = df[ct_series < pd.Timestamp.now(tz="UTC")]
+
+        return df.iloc[-bars:]  # cap to requested count
 
     def get_funding_rates(
         self,

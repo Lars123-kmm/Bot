@@ -16,20 +16,25 @@ def clear():
 
 def menu():
     clear()
-    print("╔══════════════════════════════════════════════════════╗")
-    print("║           ML-TRADING-BOT  —  STARTMENÜ              ║")
-    print("╠══════════════════════════════════════════════════════╣")
-    print("║  1)  Demo          — Alle Komponenten testen         ║")
-    print("║                      (kein MT5, keine echten Daten)  ║")
-    print("║                                                      ║")
-    print("║  2)  Training      — Modell mit CSV-Datei trainieren ║")
-    print("║  3)  Backtest      — Backtest mit CSV-Datei + ML     ║")
-    print("║  4)  Optimierung   — Hyperparameter optimieren       ║")
-    print("║  5)  Live-Trading  — Echtzeit-Trading via MT5        ║")
-    print("║                                                      ║")
-    print("║  0)  Beenden                                         ║")
-    print("╚══════════════════════════════════════════════════════╝")
-    return input("\n  Auswahl (0–5): ").strip()
+    print("╔══════════════════════════════════════════════════════════════╗")
+    print("║             ML-TRADING-BOT  —  STARTMENÜ                    ║")
+    print("╠══════════════════════════════════════════════════════════════╣")
+    print("║  1)  Demo            — Alle Komponenten testen               ║")
+    print("║                        (kein MT5, keine echten Daten)        ║")
+    print("║                                                              ║")
+    print("║  2)  Training        — Modell mit CSV-Datei trainieren       ║")
+    print("║  3)  Backtest        — Backtest mit CSV-Datei + ML           ║")
+    print("║  4)  Optimierung     — Hyperparameter optimieren             ║")
+    print("║                                                              ║")
+    print("║  5)  MT5 Live        — Echtzeit-Trading via MetaTrader 5     ║")
+    print("║                                                              ║")
+    print("║  6)  Paper Trading   — Live Binance-Daten, kein echtes Geld ║")
+    print("║                        (Bot lernt automatisch dazu)          ║")
+    print("║  7)  Echtes Trading  — Live Binance-Orders (API-Key nötig)  ║")
+    print("║                                                              ║")
+    print("║  0)  Beenden                                                 ║")
+    print("╚══════════════════════════════════════════════════════════════╝")
+    return input("\n  Auswahl (0–7): ").strip()
 
 
 def ask_csv() -> str:
@@ -38,6 +43,12 @@ def ask_csv() -> str:
         print(f"\n  ✗ Datei nicht gefunden: {path}")
         sys.exit(1)
     return path
+
+
+def ask_symbols() -> str:
+    default = "BTCUSDT,ETHUSDT"
+    s = input(f"  Symbole (komma-getrennt) [{default}]: ").strip()
+    return s if s else default
 
 
 def run(cmd: list[str]) -> None:
@@ -86,11 +97,47 @@ def main():
             input("\n  [Enter] zurück zum Menü...")
 
         elif choice == "5":
-            print("\n  ⚠  Live-Trading benötigt MetaTrader 5.")
+            print("\n  ⚠  MT5 Live-Trading benötigt MetaTrader 5.")
             print("     Config: src/config/default.yaml")
             ok = input("  Wirklich starten? (ja/nein): ").strip().lower()
             if ok == "ja":
                 run([sys.executable, "src/main.py", "--mode", "live"])
+            input("\n  [Enter] zurück zum Menü...")
+
+        elif choice == "6":
+            print("\n  Paper Trading auf Live Binance-Daten")
+            print("  Kein API-Key nötig. Der Bot lernt automatisch nach jedem Trade.\n")
+            symbols = ask_symbols()
+            capital = input("  Startkapital in USD [10000]: ").strip() or "10000"
+            retrain = input("  Auto-Retrain alle N Bars (0 = aus) [0]: ").strip() or "0"
+            run([
+                sys.executable, "src/main.py",
+                "--mode", "paper",
+                "--symbols", symbols,
+                "--capital", capital,
+                "--retrain-every", retrain,
+            ])
+            input("\n  [Enter] zurück zum Menü...")
+
+        elif choice == "7":
+            print("\n  ⚠  ECHTES TRADING — ECHTES GELD!")
+            print("     Benötigt:")
+            print("       - BINANCE_API_KEY  (Umgebungsvariable)")
+            print("       - BINANCE_API_SECRET  (Umgebungsvariable)")
+            print("       - 'live.real_orders_confirmed: true' in src/config/default.yaml")
+            print("       - 'live.use_testnet: false' für Mainnet\n")
+            ok = input("  Wirklich starten? (ja/nein): ").strip().lower()
+            if ok == "ja":
+                symbols = ask_symbols()
+                capital = input("  Startkapital-Referenz in USD [10000]: ").strip() or "10000"
+                retrain = input("  Auto-Retrain alle N Bars (0 = aus) [0]: ").strip() or "0"
+                run([
+                    sys.executable, "src/main.py",
+                    "--mode", "trade",
+                    "--symbols", symbols,
+                    "--capital", capital,
+                    "--retrain-every", retrain,
+                ])
             input("\n  [Enter] zurück zum Menü...")
 
         else:

@@ -29,7 +29,7 @@ def _parse_args() -> argparse.Namespace:
         description="Multi-Filter EMA-Crossover Tradingbot",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--mode", choices=["backtest", "live", "train", "optimize"],
+    parser.add_argument("--mode", choices=["backtest", "live", "train", "optimize", "paper", "trade"],
                         default="backtest")
     parser.add_argument("--config", default="src/config/default.yaml")
     parser.add_argument("--capital", type=float, default=10_000.0,
@@ -52,6 +52,10 @@ def _parse_args() -> argparse.Namespace:
                         help="Überschreibt bars.type aus der Config (Standard: Config-Wert)")
     parser.add_argument("--trials", type=int, default=50,
                         help="Anzahl Optuna-Trials für --mode optimize")
+    parser.add_argument("--symbols", default=None,
+                        help="Komma-getrennte Symbole für Paper/Live (z.B. BTCUSDT,ETHUSDT)")
+    parser.add_argument("--retrain-every", type=int, default=0,
+                        help="Bars zwischen Auto-Retrains (0 = deaktiviert)")
     return parser.parse_args()
 
 
@@ -293,6 +297,45 @@ def run_live(cfg: dict, args: argparse.Namespace) -> None:
     trader.run()
 
 
+def run_paper(cfg: dict, args: argparse.Namespace) -> None:
+    """Paper trading on live Binance data — no real money."""
+    from src.runner.live_runner import LiveRunner
+
+    symbols = [s.strip() for s in args.symbols.split(",")] if args.symbols else None
+    runner = LiveRunner(
+        cfg=cfg,
+        mode="paper",
+        symbols=symbols,
+        initial_capital=args.capital,
+        retrain_every=args.retrain_every,
+        report_dir=Path(args.report_dir) if args.report_dir else None,
+    )
+    runner.run()
+
+
+def run_trade(cfg: dict, args: argparse.Namespace) -> None:
+    """Live trading on Binance with real orders."""
+    live_cfg = cfg.get("live", {})
+    if not live_cfg.get("real_orders_confirmed", False):
+        print("\n  ⚠  Echtes Trading erfordert 'live.real_orders_confirmed: true' in der Config.")
+        print("     Außerdem werden BINANCE_API_KEY und BINANCE_API_SECRET benötigt.")
+        print("     Zum Testen bitte --mode paper verwenden.\n")
+        return
+
+    from src.runner.live_runner import LiveRunner
+
+    symbols = [s.strip() for s in args.symbols.split(",")] if args.symbols else None
+    runner = LiveRunner(
+        cfg=cfg,
+        mode="live",
+        symbols=symbols,
+        initial_capital=args.capital,
+        retrain_every=args.retrain_every,
+        report_dir=Path(args.report_dir) if args.report_dir else None,
+    )
+    runner.run()
+
+
 def main() -> int:
     args = _parse_args()
     setup_logger(level=args.log_level)
@@ -312,6 +355,8 @@ def main() -> int:
         "live": run_live,
         "train": run_train,
         "optimize": run_optimize,
+        "paper": run_paper,
+        "trade": run_trade,
     }
     mode_map[args.mode](cfg, args)
 

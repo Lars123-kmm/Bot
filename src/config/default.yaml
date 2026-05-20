@@ -107,3 +107,26 @@ online_model:
   enabled: true
   blend_weight: 0.3         # Anteil ARF im finalen Blend (0 = deaktiviert)
   model_path: "models/online_filter.pkl"
+
+# ---- Live / Paper Trading (Binance) ----
+live:
+  # Symbole für den Multi-Symbol-Loop (überschreibbar per --symbols CLI-Flag)
+  symbols:
+    - "BTCUSDT"
+    - "ETHUSDT"
+
+  # Startkapital für Paper Trading
+  starting_capital: 10000.0
+
+  # Handelsgebühr pro Seite (Binance Futures Taker: 0.04%)
+  fee_rate: 0.0004
+
+  # Spread-Simulation für Paper Trading (0.01% Half-Spread)
+  spread_pct: 0.0001
+
+  # Auto-Retrain: Bars zwischen Walk-Forward-Retrains (0 = aus)
+  retrain_every: 0
+
+  # Binance API (nur für --mode trade)
+  use_testnet: true           # true = Testnet, false = Mainnet (ECHTES GELD!)
+  real_orders_confirmed: false  # MUSS auf true gesetzt werden für Mainnet-Orders
