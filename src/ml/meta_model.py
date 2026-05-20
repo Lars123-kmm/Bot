@@ -40,15 +40,25 @@ class MetaModel:
     # Training
     # ------------------------------------------------------------------
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "MetaModel":
+    def fit(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        sample_weight: Optional[pd.Series] = None,
+    ) -> "MetaModel":
         """
         Trainiert LightGBM auf Triple-Barrier-Labels und kalibriert die Ausgaben.
 
         X: Feature-Matrix (aus build_ml_features(), Spalten = ML_FEATURE_COLS)
         y: Binäre Labels (0/1, aus triple_barrier_labels())
+        sample_weight: Optional López-de-Prado Sample-Uniqueness-Gewichte
         """
         X_feat = self._select_features(X)
         X_scaled = self._scaler.fit_transform(X_feat)
+
+        sw = None
+        if sample_weight is not None:
+            sw = sample_weight.reindex(X.index).fillna(1.0).values
 
         ml_cfg = self._cfg.get("ml", {})
         base = LGBMClassifier(
@@ -62,9 +72,9 @@ class MetaModel:
             verbose=-1,
         )
 
-        # Kalibrierung: Platt Scaling → kalibrierte Wahrscheinlichkeiten
-        self._model = CalibratedClassifierCV(base, method="sigmoid", cv=3)
-        self._model.fit(X_scaled, y.values)
+        # Isotonische Kalibrierung (flexibler als Platt/Sigmoid, besser bei asymm. Verteilungen)
+        self._model = CalibratedClassifierCV(base, method="isotonic", cv=3)
+        self._model.fit(X_scaled, y.values, sample_weight=sw)
 
         # Feature-Importance aus dem Base-Modell extrahieren
         if hasattr(self._model.calibrated_classifiers_[0].estimator, "feature_importances_"):

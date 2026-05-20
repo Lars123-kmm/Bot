@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from scipy.stats import norm
+
 
 def calculate_position(
     capital: float,
@@ -89,6 +91,23 @@ def probability_scaled_position(
 
     return calculate_position(capital, entry_price, atr, effective_risk,
                                stop_mult=stop_mult, tp_mult=tp_mult, direction=direction)
+
+
+def lopez_bet_size(
+    prob: float,
+    freq: float = 1.0,
+) -> float:
+    """
+    Position size from calibrated probability (López de Prado Ch. 10).
+    z = (prob - 0.5) / sqrt(prob*(1-prob)) * sqrt(freq)
+    size = 2*Φ(z) - 1  ∈ [0, 1]
+    Returns 0 for prob <= 0.5 (no edge).
+    """
+    if prob <= 0.5:
+        return 0.0
+    denom = max(prob * (1.0 - prob), 1e-10) ** 0.5
+    z = (prob - 0.5) / denom * (freq ** 0.5)
+    return float(max(0.0, min(1.0, 2.0 * norm.cdf(z) - 1.0)))
 
 
 def half_kelly(win_rate: float, avg_win: float, avg_loss: float) -> float:

@@ -8,3 +8,7 @@ optuna
 scipy
 statsmodels
 shap
+hmmlearn
+ccxt
+river
+joblib

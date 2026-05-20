@@ -77,3 +77,33 @@ regime:
   vol_volatile_threshold: 0.80 # > 80% annualisierte Vola = VOLATILE
   adx_min_for_trend: 22        # ADX-Bestätigung für Trend-Klassifikation
   half_size_in_volatile: true  # Halbes Sizing bei VOLATILE-Regime
+
+# ---- Bar-Typ ----
+bars:
+  type: "time"              # "time" | "dollar" | "volume"
+  target_bars_per_day: 50   # Ziel-Bars/Tag für Dollar-/Volume-Bars
+
+# ---- Binance Enrichment (Public API, kein Key nötig) ----
+binance:
+  enabled: false            # true = Funding Rate + OI + OBI als Features
+  symbol: "BTCUSDT"         # Perpetuals-Symbol auf Binance Futures
+  order_book_levels: 5      # Top-k Levels für OBI
+
+# ---- HMM Regime ----
+hmm:
+  enabled: true
+  n_components: 2           # 2-State HMM
+  model_path: "models/hmm_detector.pkl"
+  retrain_bars: 2000        # HMM auf letzten N Bars trainieren
+
+# ---- Champion-Challenger ----
+champion_challenger:
+  enabled: true
+  n_windows_needed: 3       # Consecutive OOS-Wins für Promotion
+  metric: "sharpe"          # Vergleichsmetrik: sharpe | auc
+
+# ---- Online-Lernen (River ARF) ----
+online_model:
+  enabled: true
+  blend_weight: 0.3         # Anteil ARF im finalen Blend (0 = deaktiviert)
+  model_path: "models/online_filter.pkl"

@@ -13,6 +13,9 @@ from src.Execution.order_state import ActiveTrade
 from src.common.types import ClosedTrade
 from src.data.mt5._fetch import MT5FetchConfig, fetch_rates, mt5_initialize, mt5_shutdown
 from src.features.indicators import compute_indicators
+from src.features.ml_features import ML_FEATURE_COLS, build_ml_features
+from src.ml.meta_model import MetaModel
+from src.ml.online_model import OnlineMetaFilter
 from src.risk.guards import ConsecutiveLossGuard, DrawdownGuard
 from src.risk.sizing import calculate_position
 from src.strategies.ema_atr import generate_signals
@@ -57,6 +60,22 @@ class LiveTrader:
             self._reporter = DailyReporter(report_dir)
         else:
             self._reporter = None
+
+        # MetaModel + Online-Filter (optional, geladen wenn model_path existiert)
+        self._meta_model: Optional[MetaModel] = None
+        self._online_filter: Optional[OnlineMetaFilter] = None
+        self._entry_features: Optional[dict] = None
+        if cfg.get("ml", {}).get("enabled"):
+            model_path = Path(cfg["ml"].get("model_path", "models/")) / "meta_model.pkl"
+            if model_path.exists():
+                self._meta_model = MetaModel(cfg).load(model_path)
+                self._online_filter = OnlineMetaFilter(cfg)
+                online_path = model_path.parent / "online_filter.pkl"
+                if online_path.exists():
+                    self._online_filter.load(online_path)
+                logger.info("MetaModel geladen: %s", model_path)
+            else:
+                logger.info("Kein MetaModel gefunden (%s) — ML-Filter deaktiviert.", model_path)
 
         tf_str = cfg["timeframe"]
         if tf_str not in _TIMEFRAME_MAP:
@@ -108,14 +127,18 @@ class LiveTrader:
                            self.loss_guard.consecutive_losses)
             return
 
-        # Trailing Stop für offene Position aktualisieren
+        # Trailing Stop für offene Position aktualisieren + Online-Lernen bei Schließung
         if self.active_trade is not None:
             self._update_trailing(df)
+            self._check_closed_position()
 
         # Signal der letzten abgeschlossenen Bar (index -1, shift(1) bereits angewendet)
         last = df.iloc[-1]
         signal = int(last["signal"])
         atr = float(last["atr"])
+
+        if self.active_trade is None and signal != 0:
+            signal = self._apply_ml_filter(df, signal)
 
         if self.active_trade is None and signal != 0:
             self._open_position(signal, float(last["close"]), atr)
@@ -176,6 +199,46 @@ class LiveTrader:
         )
         logger.info("Position eröffnet: %s dir=%d size=%.6f sl=%.5f tp=%.5f",
                     self.symbol, signal, pos_info["size"], pos_info["stop"], pos_info["take_profit"])
+
+    def _apply_ml_filter(self, df: Any, signal: int) -> int:
+        """Filters signal through MetaModel + OnlineMetaFilter. Returns 0 to block."""
+        if self._meta_model is None:
+            return signal
+        try:
+            df_feat = build_ml_features(df, self.cfg)
+            if len(df_feat) == 0:
+                return signal
+            last_feat = df_feat.iloc[[-1]]
+            tradeable, prob = self._meta_model.is_tradeable(last_feat)
+            if not tradeable:
+                logger.debug("ML-Filter blockiert Signal (prob=%.3f < threshold=%.3f)", prob, self._meta_model.threshold)
+                return 0
+            x_dict = last_feat[ML_FEATURE_COLS].iloc[0].to_dict()
+            blended_prob = self._online_filter.blend(prob, x_dict) if self._online_filter else prob
+            if blended_prob < self._meta_model.threshold:
+                logger.debug("Online-Blend blockiert Signal (blended_prob=%.3f)", blended_prob)
+                return 0
+            self._entry_features = x_dict
+        except Exception as exc:
+            logger.warning("ML-Filter Fehler (%s) — Signal nicht gefiltert.", exc)
+        return signal
+
+    def _check_closed_position(self) -> None:
+        """Detects if the active trade closed at broker (SL/TP) and updates online model."""
+        if self.active_trade is None or self._online_filter is None or not self._entry_features:
+            return
+        positions = mt5.positions_get(ticket=self.active_trade.ticket)
+        if positions is not None and len(positions) > 0:
+            return  # still open
+        history = mt5.history_deals_get(position=self.active_trade.ticket)
+        if history:
+            pnl = sum(getattr(deal, "profit", 0.0) for deal in history)
+            outcome = 1 if pnl > 0 else 0
+            self._online_filter.partial_fit(self._entry_features, outcome)
+            logger.info("Online-Lerner aktualisiert: outcome=%d pnl=%.2f stats=%s",
+                        outcome, pnl, self._online_filter.stats())
+        self.active_trade = None
+        self._entry_features = None
 
     def _end_of_day_report(self, report_date: Any, account: Dict[str, float]) -> None:
         if self._reporter is None:

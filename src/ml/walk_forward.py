@@ -10,6 +10,8 @@ from src.features.indicators import compute_indicators
 from src.features.ml_features import ML_FEATURE_COLS, build_ml_features
 from src.ml.labeling import purge_overlap, triple_barrier_labels
 from src.ml.meta_model import MetaModel
+from src.ml.sample_weights import compute_sample_weights
+from src.ml.validation import deflated_sharpe_ratio, probability_of_backtest_overfitting
 from src.strategies.ema_atr import generate_signals
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,7 @@ class WalkForwardResult:
     test_metrics: Dict[str, float]     # AUC, Accuracy auf Test-Set
     n_train_labels: int
     n_test_labels: int
+    dsr: float = 0.0                   # Deflated Sharpe Ratio für diesen Fold
     feature_importance: Dict[str, float] = field(default_factory=dict)
 
 
@@ -73,6 +76,7 @@ def walk_forward_train(
     results: List[WalkForwardResult] = []
     best_model: Optional[MetaModel] = None
     best_auc = -1.0
+    oos_sharpes: List[float] = []
 
     fold = 0
     start = 0
@@ -117,9 +121,16 @@ def walk_forward_train(
         X_train = train_df.loc[X_train_raw.index, ML_FEATURE_COLS]
         y_train = y_train_labels["label"]
 
+        # Sample-Uniqueness-Gewichte (López de Prado §4.4) — reduziert Non-IID-Bias
+        sample_weight = compute_sample_weights(
+            y_train_labels,
+            train_df.index,
+            max_bars=int(ml_cfg.get("label_max_bars", 48)),
+        )
+
         # Modell trainieren
         model = MetaModel(cfg)
-        model.fit(X_train, y_train)
+        model.fit(X_train, y_train, sample_weight=sample_weight)
 
         # Labels für Test-Set
         test_signal_mask = (test_df["signal"] != 0)
@@ -143,6 +154,16 @@ def walk_forward_train(
                     test_metrics = {"auc": round(auc, 4), "accuracy": round(accuracy, 4),
                                     "n_signals": len(y_test)}
 
+        # DSR: proxy-SR aus OOS-AUC, angepasst für Anzahl Trials (Folds)
+        oos_auc = test_metrics.get("auc", 0.5)
+        pseudo_sr = (oos_auc - 0.5) * 4.0  # AUC=0.7 → SR≈0.8
+        oos_sharpes.append(pseudo_sr)
+        fold_dsr = deflated_sharpe_ratio(
+            sr=pseudo_sr,
+            t=max(test_metrics.get("n_signals", 30), 10),
+            n_trials=fold + 1,
+        )
+
         result = WalkForwardResult(
             fold=fold,
             train_start=str(train_df.index[0].date()),
@@ -154,16 +175,20 @@ def walk_forward_train(
             test_metrics=test_metrics,
             n_train_labels=len(y_train),
             n_test_labels=test_metrics.get("n_signals", 0),
+            dsr=round(fold_dsr, 4),
             feature_importance=model.top_features(10),
         )
         results.append(result)
 
-        logger.info("Fold %d: Train=%s→%s | Test=%s→%s | Train-AUC=%.3f | Test-AUC=%.3f | Labels=%d",
-                    fold, result.train_start, result.train_end,
-                    result.test_start, result.test_end,
-                    result.train_metrics.get("auc", 0),
-                    result.test_metrics.get("auc", 0),
-                    result.n_train_labels)
+        logger.info(
+            "Fold %d: Train=%s→%s | Test=%s→%s | Train-AUC=%.3f | Test-AUC=%.3f | DSR=%.3f | Labels=%d",
+            fold, result.train_start, result.train_end,
+            result.test_start, result.test_end,
+            result.train_metrics.get("auc", 0),
+            result.test_metrics.get("auc", 0),
+            result.dsr,
+            result.n_train_labels,
+        )
 
         if test_metrics.get("auc", 0) > best_auc:
             best_auc = test_metrics.get("auc", 0)
@@ -179,5 +204,9 @@ def walk_forward_train(
     if best_model is None:
         best_model = results[-1].model
 
-    logger.info("Walk-Forward abgeschlossen: %d Folds, bestes Test-AUC=%.3f", fold, best_auc)
+    pbo = probability_of_backtest_overfitting(oos_sharpes)
+    logger.info(
+        "Walk-Forward abgeschlossen: %d Folds | bestes Test-AUC=%.3f | PBO=%.2f",
+        fold, best_auc, pbo,
+    )
     return best_model, results
