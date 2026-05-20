@@ -47,6 +47,50 @@ def calculate_position(
     }
 
 
+def probability_scaled_position(
+    capital: float,
+    entry_price: float,
+    atr: float,
+    risk_pct: float,
+    meta_prob: float,
+    min_prob: float = 0.55,
+    max_scale: float = 2.0,
+    stop_mult: float = 2.0,
+    tp_mult: float = 3.0,
+    direction: int = 1,
+    sizing_scale: float = 1.0,
+) -> dict:
+    """
+    Wahrscheinlichkeits-skaliertes Position Sizing (Meta-Labeling).
+
+    Die Positionsgröße wächst linear mit der Modell-Konfidenz:
+      prob = min_prob  → scale = 0    (kein Trade, sollte schon gefiltert sein)
+      prob = midpoint  → scale = 1.0  (normale Größe)
+      prob = 1.0       → scale = max_scale
+
+    Zusätzlicher sizing_scale-Faktor z.B. 0.5 bei VOLATILE-Regime.
+
+    Args:
+        meta_prob:    Modell-Wahrscheinlichkeit [0, 1]
+        min_prob:     Untere Schwelle (unter der kein Trade)
+        max_scale:    Maximaler Skalierungsfaktor (Standard: 2.0)
+        sizing_scale: Externer Skalierungsfaktor (z.B. 0.5 bei VOLATILE)
+    """
+    prob_range = 1.0 - min_prob
+    if prob_range <= 0:
+        scale = 1.0
+    else:
+        scale = min(max_scale, (meta_prob - min_prob) / prob_range * max_scale)
+        scale = max(0.0, scale)
+
+    effective_risk = risk_pct * scale * sizing_scale
+    if effective_risk <= 0:
+        effective_risk = risk_pct * 0.1  # Mindest-Fallback
+
+    return calculate_position(capital, entry_price, atr, effective_risk,
+                               stop_mult=stop_mult, tp_mult=tp_mult, direction=direction)
+
+
 def half_kelly(win_rate: float, avg_win: float, avg_loss: float) -> float:
     """
     Half-Kelly Criterion für optionale Sizing-Überprüfung.

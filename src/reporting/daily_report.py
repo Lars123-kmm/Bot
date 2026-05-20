@@ -32,16 +32,25 @@ class DailyReporter:
         drawdown_guard: DrawdownGuard,
         loss_guard: ConsecutiveLossGuard,
         indicator_summary: Optional[dict] = None,
+        regime_summary: Optional[dict] = None,
+        ml_summary: Optional[dict] = None,
+        feature_importances: Optional[dict] = None,
     ) -> Path:
         """
         Erstellt den Tagesbericht und speichert ihn als .md Datei.
         Gibt den Pfad zur erzeugten Datei zurück.
         Wirft keine Exceptions – Fehler werden nur geloggt.
+
+        Args:
+            regime_summary:      {"trend_pct": 60, "range_pct": 30, "volatile_pct": 10, "dominant": "Trend"}
+            ml_summary:          {"avg_proba": 0.63, "signals_filtered": 3, "model_auc": 0.58}
+            feature_importances: {"ema_spread": 0.15, "adx_momentum": 0.12, ...} (Top-N)
         """
         try:
             content = self._build_report(
                 report_date, trades, equity_start, equity_end,
                 drawdown_guard, loss_guard, indicator_summary,
+                regime_summary, ml_summary, feature_importances,
             )
             path = self.report_dir / f"{report_date}.md"
             path.write_text(content, encoding="utf-8")
@@ -59,6 +68,9 @@ class DailyReporter:
         drawdown_guard: DrawdownGuard,
         loss_guard: ConsecutiveLossGuard,
         indicator_summary: Optional[dict],
+        regime_summary: Optional[dict] = None,
+        ml_summary: Optional[dict] = None,
+        feature_importances: Optional[dict] = None,
     ) -> str:
         day_return = ((equity_end / equity_start) - 1) * 100 if equity_start > 0 else 0.0
         sign = "+" if day_return >= 0 else ""
@@ -138,6 +150,41 @@ class DailyReporter:
             "## Einschätzung",
         ]
 
+        # --- KI/ML-Sektionen ---
+        if regime_summary:
+            lines += [
+                "",
+                "## Regime-Analyse",
+                "| Marktphase | Anteil heute |",
+                "|---|---|",
+                f"| Trending | {regime_summary.get('trend_pct', 0):.1f}% |",
+                f"| Range (kein Trading) | {regime_summary.get('range_pct', 0):.1f}% |",
+                f"| Volatil (halbes Sizing) | {regime_summary.get('volatile_pct', 0):.1f}% |",
+                f"| **Dominante Phase** | **{regime_summary.get('dominant', '?')}** |",
+            ]
+
+        if ml_summary:
+            lines += [
+                "",
+                "## Meta-Modell (KI)",
+                "| Metrik | Wert |",
+                "|---|---|",
+                f"| Durchschnittliche Konfidenz | {ml_summary.get('avg_proba', 0)*100:.1f}% |",
+                f"| Gefilterte Signale (zu niedrige Konfidenz) | {ml_summary.get('signals_filtered', 0)} |",
+                f"| Modell-AUC (Trainingsset) | {ml_summary.get('model_auc', 0):.3f} |",
+            ]
+
+        if feature_importances:
+            top5 = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:5]
+            lines += [
+                "",
+                "## Top-5 Einfluss-Faktoren (Feature Importance)",
+                "| Feature | Gewicht |",
+                "|---|---|",
+            ]
+            for feat, imp in top5:
+                lines.append(f"| {feat} | {imp:.4f} |")
+
         assessment = _generate_assessment(
             n_trades=n,
             win_rate=win_rate,
@@ -148,11 +195,15 @@ class DailyReporter:
             consec=consec,
             consec_limit=consec_limit,
             indicator_summary=indicator_summary,
+            regime_summary=regime_summary,
+            ml_summary=ml_summary,
         )
+        lines.append("")
+        lines.append("## Einschätzung")
         lines.append(assessment)
         lines.append("")
         lines.append("---")
-        lines.append("_Automatisch generiert vom EMA-Crossover-Bot_")
+        lines.append("_Automatisch generiert vom EMA-Crossover-Bot mit KI-Analyse_")
 
         return "\n".join(lines)
 
@@ -167,6 +218,8 @@ def _generate_assessment(
     consec: int,
     consec_limit: int,
     indicator_summary: Optional[dict],
+    regime_summary: Optional[dict] = None,
+    ml_summary: Optional[dict] = None,
 ) -> str:
     parts = []
 
@@ -200,6 +253,33 @@ def _generate_assessment(
         if avg_adx is not None:
             phase = "Trending" if avg_adx > 30 else ("Übergangsphase" if avg_adx > 20 else "Range")
             parts.append(f"**Marktphase:** {phase} (Durchschnittlicher ADX: {avg_adx:.1f}).")
+
+    if regime_summary:
+        dominant = regime_summary.get("dominant", "?")
+        range_pct = regime_summary.get("range_pct", 0)
+        vol_pct = regime_summary.get("volatile_pct", 0)
+        if range_pct > 50:
+            parts.append(f"**KI-Regime:** Heute überwiegend Range-Phase ({range_pct:.0f}%) – "
+                         "viele Signale wurden vom Regime-Gate blockiert. Das ist erwünscht.")
+        elif vol_pct > 30:
+            parts.append(f"**KI-Regime:** Erhöhte Volatilität ({vol_pct:.0f}% der Zeit) – "
+                         "Positionen wurden mit halbem Sizing gefahren.")
+        else:
+            parts.append(f"**KI-Regime:** Dominante Phase '{dominant}' – optimale Handelsbedingungen.")
+
+    if ml_summary:
+        avg_proba = ml_summary.get("avg_proba", 0)
+        filtered = ml_summary.get("signals_filtered", 0)
+        auc = ml_summary.get("model_auc", 0)
+        if avg_proba > 0.65:
+            parts.append(f"**KI-Konfidenz:** Hoch ({avg_proba*100:.1f}%) – "
+                         "Modell zeigt starke Überzeugung in heutige Setups.")
+        elif avg_proba < 0.55:
+            parts.append(f"**KI-Konfidenz:** Niedrig ({avg_proba*100:.1f}%) – "
+                         f"{filtered} Signale wurden gefiltert. Markt möglicherweise schwer vorhersagbar.")
+        if auc > 0:
+            parts.append(f"**Modell-Qualität:** AUC={auc:.3f} "
+                         f"({'gut' if auc > 0.6 else 'akzeptabel' if auc > 0.55 else 'schwach – Retraining erwägen'}).")
 
     if not parts:
         parts.append("Strategie läuft planmäßig. Keine Anpassungen nötig.")

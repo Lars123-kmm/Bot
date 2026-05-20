@@ -44,3 +44,36 @@ execution:
   magic_number: 240101
   slippage_points: 10
   deviation_points: 20
+
+# ---- Machine Learning (Meta-Labeling) ----
+ml:
+  enabled: true
+  min_probability: 0.55        # Mindest-Konfidenz für Trade-Freigabe
+  model_path: "models/"        # Verzeichnis für gespeicherte Modelle
+
+  # Triple-Barrier-Labeling
+  label_upper_mult: 2.0        # TP-Barriere: 2 * ATR
+  label_lower_mult: 2.0        # SL-Barriere: 2 * ATR
+  label_max_bars: 48
+
+  # Walk-Forward
+  train_bars: 2000             # ~83 Tage bei H1
+  test_bars: 500               # ~21 Tage
+  step_bars: 250
+  purge_bars: 48               # Gap zwischen Train/Test (verhindert Leakage)
+
+  # LightGBM (Startparameter, werden durch Optuna optimiert)
+  lgbm_num_leaves: 50
+  lgbm_learning_rate: 0.05
+  lgbm_n_estimators: 200
+  lgbm_min_child_samples: 20
+
+# ---- Regime-Erkennung ----
+regime:
+  enabled: true
+  window: 100                  # Rolling-Window in Bars für Hurst + Vola
+  hurst_trend_threshold: 0.55  # H > 0.55 = Trending
+  hurst_range_threshold: 0.45  # H < 0.45 = Mean-Reverting
+  vol_volatile_threshold: 0.80 # > 80% annualisierte Vola = VOLATILE
+  adx_min_for_trend: 22        # ADX-Bestätigung für Trend-Klassifikation
+  half_size_in_volatile: true  # Halbes Sizing bei VOLATILE-Regime

@@ -2,3 +2,9 @@ MetaTrader5
 pandas
 numpy
 PyYAML
+scikit-learn
+lightgbm
+optuna
+scipy
+statsmodels
+shap
