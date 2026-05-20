@@ -114,9 +114,11 @@ def run_backtest(cfg: dict, args: argparse.Namespace) -> None:
         logger.info("Lade ML-Modell und berechne Regime...")
         store = ModelStore(cfg["ml"].get("model_path", "models/"))
         try:
-            meta_model, meta_info = store.load_latest(cfg)
-            logger.info("Modell geladen: v%d (AUC=%.3f)", meta_info["version"],
-                        meta_info.get("train_metrics", {}).get("auc", 0))
+            meta_model, meta_info = store.load_champion(cfg)
+            logger.info("Champion-Modell geladen: v%d (AUC=%.3f, Status=%s)",
+                        meta_info["version"],
+                        meta_info.get("train_metrics", {}).get("auc", 0),
+                        meta_info.get("champion_status", "n/a"))
         except FileNotFoundError as e:
             logger.error("%s\n→ Bitte zuerst: python src/main.py --mode train", e)
             return
@@ -180,24 +182,82 @@ def run_train(cfg: dict, args: argparse.Namespace) -> None:
 
     logger.info("\nWalk-Forward Ergebnisse:")
     for r in results:
-        logger.info("  Fold %d: Train-AUC=%.3f | Test-AUC=%.3f | Labels=%d",
+        logger.info("  Fold %d: Train-AUC=%.3f | Test-AUC=%.3f | DSR=%.3f | Labels=%d",
                     r.fold, r.train_metrics.get("auc", 0),
-                    r.test_metrics.get("auc", 0), r.n_train_labels)
+                    r.test_metrics.get("auc", 0), r.dsr, r.n_train_labels)
 
     store = ModelStore(cfg["ml"].get("model_path", "models/"))
-    avg_test_auc = sum(r.test_metrics.get("auc", 0) for r in results) / max(len(results), 1)
+    avg_test_auc = round(sum(r.test_metrics.get("auc", 0) for r in results) / max(len(results), 1), 4)
+
+    # Champion-Challenger: neues Modell gegen aktuellen Champion bewerten
+    status, streak = _evaluate_champion_challenger(
+        cfg, store, best_model, avg_test_auc, len(results), logger)
+
     path = store.save(best_model, metadata={
         "description": f"Walk-Forward ({len(results)} Folds)",
-        "avg_test_auc": round(avg_test_auc, 4),
+        "avg_test_auc": avg_test_auc,
         "n_folds": len(results),
+        "champion_status": status,
+        "challenger_streak": streak,
     })
-    logger.info("Bestes Modell gespeichert: %s", path)
+    logger.info("Modell gespeichert: %s (Status: %s)", path, status)
 
     print("\n=== TOP-10 FEATURE IMPORTANCE ===")
     for feat, imp in best_model.top_features(10).items():
         bar = "█" * int(imp * 200)
         print(f"  {feat:<25} {bar} {imp:.4f}")
     print()
+
+
+def _evaluate_champion_challenger(cfg, store, new_model, avg_test_auc, n_folds, logger):
+    """
+    Vergleicht das neu trainierte Modell mit dem aktuellen Champion.
+    Gibt (champion_status, challenger_streak) für die Registry zurück.
+    Bei deaktivierter Config wird jedes Modell direkt Champion.
+    """
+    cc_cfg = cfg.get("champion_challenger", {})
+    if not cc_cfg.get("enabled", False):
+        return "champion", 0
+
+    from src.ml.champion_challenger import ChampionChallenger
+
+    cc = ChampionChallenger(
+        n_windows_needed=int(cc_cfg.get("n_windows_needed", 3)),
+        metric="auc",
+    )
+
+    try:
+        champ_model, champ_info = store.load_champion(cfg)
+    except FileNotFoundError:
+        logger.info("Champion-Challenger: erstes Modell — wird automatisch Champion.")
+        return "champion", 0
+
+    champ_auc = champ_info.get(
+        "avg_test_auc", champ_info.get("train_metrics", {}).get("auc", 0.0))
+    cc.set_champion(champ_model, champ_info, metrics={"auc": champ_auc})
+
+    # Streak aus dem neuesten Registry-Eintrag fortführen (Persistenz)
+    versions = store.list_versions()
+    prior_streak = (max(versions, key=lambda e: e["version"]).get("challenger_streak", 0)
+                    if versions else 0)
+
+    promoted = cc.propose_challenger(
+        new_model,
+        {"description": f"Walk-Forward ({n_folds} Folds)"},
+        {"auc": avg_test_auc},
+        carry_wins=prior_streak,
+    )
+    status = "champion" if promoted else "challenger"
+
+    print("\n=== CHAMPION-CHALLENGER ===")
+    print(f"  Champion AUC (v{champ_info.get('version')}):  {champ_auc:.4f}")
+    print(f"  Neues Modell AUC:        {avg_test_auc:.4f}")
+    if promoted:
+        print(f"  → PROMOTED: neues Modell wird zum Champion")
+    else:
+        print(f"  → HOLD: Champion bleibt aktiv (Streak {cc.streak}/{cc.n_windows_needed})")
+    print()
+    return status, cc.streak
 
 
 def run_optimize(cfg: dict, args: argparse.Namespace) -> None:

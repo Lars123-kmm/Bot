@@ -61,21 +61,26 @@ class LiveTrader:
         else:
             self._reporter = None
 
-        # MetaModel + Online-Filter (optional, geladen wenn model_path existiert)
+        # MetaModel + Online-Filter (optional, Champion-Modell aus ModelStore)
         self._meta_model: Optional[MetaModel] = None
         self._online_filter: Optional[OnlineMetaFilter] = None
         self._entry_features: Optional[dict] = None
         if cfg.get("ml", {}).get("enabled"):
-            model_path = Path(cfg["ml"].get("model_path", "models/")) / "meta_model.pkl"
-            if model_path.exists():
-                self._meta_model = MetaModel(cfg).load(model_path)
+            from src.ml.model_store import ModelStore
+            model_dir = cfg["ml"].get("model_path", "models/")
+            try:
+                store = ModelStore(model_dir)
+                self._meta_model, champ_info = store.load_champion(cfg)
                 self._online_filter = OnlineMetaFilter(cfg)
-                online_path = model_path.parent / "online_filter.pkl"
+                online_path = Path(model_dir) / "online_filter.pkl"
                 if online_path.exists():
                     self._online_filter.load(online_path)
-                logger.info("MetaModel geladen: %s", model_path)
-            else:
-                logger.info("Kein MetaModel gefunden (%s) — ML-Filter deaktiviert.", model_path)
+                logger.info("Champion-Modell geladen: v%d (AUC=%.3f)",
+                            champ_info.get("version", 0),
+                            champ_info.get("avg_test_auc",
+                                            champ_info.get("train_metrics", {}).get("auc", 0.0)))
+            except FileNotFoundError:
+                logger.info("Kein trainiertes Modell gefunden — ML-Filter deaktiviert.")
 
         tf_str = cfg["timeframe"]
         if tf_str not in _TIMEFRAME_MAP:

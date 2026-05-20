@@ -89,6 +89,30 @@ class ModelStore:
         model = MetaModel(cfg).load(path)
         return model, latest
 
+    def load_champion(
+        self,
+        cfg: Dict[str, Any],
+        name: str = "meta_model",
+    ) -> Tuple[MetaModel, Dict[str, Any]]:
+        """
+        Lädt das neueste Modell mit champion_status == "champion".
+        Fällt auf das neueste Modell zurück, falls noch kein Champion markiert ist
+        (z.B. Modelle aus der Zeit vor der Champion-Challenger-Integration).
+        """
+        registry = self._load_registry()
+        entries = registry.get(name, [])
+        if not entries:
+            raise FileNotFoundError(
+                f"Kein Modell '{name}' gefunden in {self._registry_path}. "
+                "Zuerst --mode train ausführen."
+            )
+        champions = [e for e in entries if e.get("champion_status") == "champion"]
+        pool = champions if champions else entries
+        latest = max(pool, key=lambda e: e["version"])
+        path = self.model_dir / latest["filename"]
+        model = MetaModel(cfg).load(path)
+        return model, latest
+
     def load_version(
         self,
         cfg: Dict[str, Any],
