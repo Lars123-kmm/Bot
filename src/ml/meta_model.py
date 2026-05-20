@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -73,17 +74,38 @@ class MetaModel:
             verbose=-1,
         )
 
-        # Isotonische Kalibrierung (flexibler als Platt/Sigmoid, besser bei asymm. Verteilungen)
-        self._model = CalibratedClassifierCV(base, method="isotonic", cv=3)
-        self._model.fit(X_scaled, y.values, sample_weight=sw)
+        # Isotonische Kalibrierung — Fallback-Kette für kleine Datensätze
+        # CalibratedClassifierCV.fit löst intern sklearn-Warnings aus (numpy vs. DataFrame
+        # in CV-Folds). Nur kosmetisch, kein Einfluss auf Ergebnisse.
+        min_class = int(np.bincount(y.values.astype(int)).min())
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="X does not have valid feature names",
+                category=UserWarning,
+            )
+            if min_class >= 3:
+                self._model = CalibratedClassifierCV(base, method="isotonic", cv=3)
+                self._model.fit(X_scaled, y.values, sample_weight=sw)
+            elif min_class >= 2:
+                self._model = CalibratedClassifierCV(base, method="sigmoid", cv=2)
+                self._model.fit(X_scaled, y.values, sample_weight=sw)
+            else:
+                # Zu wenige Samples für CV-Kalibrierung → unkalibrierter LightGBM
+                base.fit(X_scaled, y.values, sample_weight=sw)
+                self._model = base
 
         # Feature-Importance aus dem Base-Modell extrahieren
-        if hasattr(self._model.calibrated_classifiers_[0].estimator, "feature_importances_"):
+        if hasattr(self._model, "calibrated_classifiers_"):
             importances = np.mean([
                 c.estimator.feature_importances_
                 for c in self._model.calibrated_classifiers_
+                if hasattr(c.estimator, "feature_importances_")
             ], axis=0)
             self.feature_importances_ = dict(zip(ML_FEATURE_COLS, importances.tolist()))
+        elif hasattr(self._model, "feature_importances_"):
+            self.feature_importances_ = dict(
+                zip(ML_FEATURE_COLS, self._model.feature_importances_.tolist())
+            )
 
         # Trainings-Metriken
         probas = self._model.predict_proba(X_scaled)[:, 1]
