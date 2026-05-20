@@ -177,8 +177,32 @@ def run_train(cfg: dict, args: argparse.Namespace) -> None:
         df = pd.read_csv(args.csv, index_col=0, parse_dates=True)
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
+    elif args.symbols:
+        # Live-Daten von Binance laden (kein API-Key nötig)
+        from src.data.binance_fetch import BinanceFetcher
+        from src.features.data_prep import prepare_market_data
+        from src.features.indicators import compute_indicators
+
+        fetcher = BinanceFetcher()
+        symbols = [s.strip() for s in args.symbols.split(",")]
+        bars = int(cfg.get("data", {}).get("bars", 5000))
+        frames = []
+        for sym in symbols:
+            logger.info("Lade %d Bars von Binance: %s %s", bars, sym, cfg["timeframe"])
+            sym_df = fetcher.fetch_ohlcv(sym, cfg["timeframe"], bars=bars)
+            if sym_df is None or len(sym_df) < 200:
+                logger.warning("%s: zu wenig Daten — übersprungen.", sym)
+                continue
+            sym_df = prepare_market_data(sym_df, cfg)
+            sym_df = compute_indicators(sym_df, cfg)
+            frames.append(sym_df)
+        if not frames:
+            logger.error("Keine Binance-Daten geladen — Training abgebrochen.")
+            return
+        df = pd.concat(frames).sort_index()
+        logger.info("Kombinierter Datensatz: %d Bars aus %d Symbolen.", len(df), len(frames))
     else:
-        logger.error("--mode train benötigt --csv <datei>. MT5-Live-Training folgt in der nächsten Version.")
+        logger.error("--mode train benötigt --csv <datei> ODER --symbols <BTCUSDT,...>.")
         return
 
     logger.info("Starte Walk-Forward-Training auf %d Bars...", len(df))

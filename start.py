@@ -22,9 +22,10 @@ def menu():
     print("║  1)  Demo            — Alle Komponenten testen               ║")
     print("║                        (kein MT5, keine echten Daten)        ║")
     print("║                                                              ║")
-    print("║  2)  Training        — Modell mit CSV-Datei trainieren       ║")
+    print("║  2)  Training (CSV)  — Modell mit CSV-Datei trainieren       ║")
     print("║  3)  Backtest        — Backtest mit CSV-Datei + ML           ║")
     print("║  4)  Optimierung     — Hyperparameter optimieren             ║")
+    print("║  8)  Training (Live) — Modell mit Binance-Daten trainieren  ║")
     print("║                                                              ║")
     print("║  5)  MT5 Live        — Echtzeit-Trading via MetaTrader 5     ║")
     print("║                                                              ║")
@@ -34,7 +35,7 @@ def menu():
     print("║                                                              ║")
     print("║  0)  Beenden                                                 ║")
     print("╚══════════════════════════════════════════════════════════════╝")
-    return input("\n  Auswahl (0–7): ").strip()
+    return input("\n  Auswahl (0–8): ").strip()
 
 
 def ask_csv() -> str:
@@ -93,6 +94,16 @@ def main():
                 "--mode", "optimize",
                 "--csv", csv,
                 "--trials", trials,
+            ])
+            input("\n  [Enter] zurück zum Menü...")
+
+        elif choice == "8":
+            print("\n  Training mit Live-Daten von Binance (kein API-Key nötig)")
+            symbols = ask_symbols()
+            run([
+                sys.executable, "src/main.py",
+                "--mode", "train",
+                "--symbols", symbols,
             ])
             input("\n  [Enter] zurück zum Menü...")
 

@@ -37,6 +37,7 @@ risk:
   max_consecutive_losses: 5
   cooldown_minutes: 30
   max_spread_atr_ratio: 0.15
+  max_portfolio_risk: 0.03      # Max. gleichzeitiges Risiko über ALLE Symbole
 
 # ---- Execution (MT5) ----
 execution:
@@ -127,6 +128,25 @@ live:
   # Auto-Retrain: Bars zwischen Walk-Forward-Retrains (0 = aus)
   retrain_every: 0
 
+  # Modell-Degradations-Erkennung: Retrain wenn Win-Rate der letzten
+  # N Trades unter den Schwellwert fällt
+  degradation_window: 20        # Anzahl letzter Trades für Win-Rate-Check
+  degradation_min_winrate: 0.35 # Unter diesem Wert → automatischer Retrain
+
   # Binance API (nur für --mode trade)
   use_testnet: true           # true = Testnet, false = Mainnet (ECHTES GELD!)
   real_orders_confirmed: false  # MUSS auf true gesetzt werden für Mainnet-Orders
+
+# ---- Multi-Timeframe-Filter ----
+mtf:
+  enabled: true
+  higher_timeframe: "H4"      # Trend dieses TF muss mit dem Signal übereinstimmen
+
+# ---- Live-Dashboard (Browser, stdlib HTTP-Server) ----
+dashboard:
+  enabled: true
+  port: 8080                  # http://localhost:8080
+
+# ---- Telegram-Benachrichtigungen ----
+notifications:
+  enabled: false              # true + TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID env-vars

@@ -9,14 +9,17 @@ from src.features.fracdiff import find_min_d, frac_diff_ffd, get_weights_ffd
 
 
 class TestGetWeightsFfd:
-    def test_first_weight_is_one(self):
+    def test_last_weight_is_one(self):
+        # weights are returned reversed (ready for dot-product with a
+        # chronological window), so the most-recent weight 1.0 is last.
         w = get_weights_ffd(0.5, size=20)
-        assert abs(w[0] - 1.0) < 1e-10
+        assert abs(w[-1] - 1.0) < 1e-10
 
-    def test_weights_decrease_in_magnitude(self):
+    def test_weights_grow_toward_most_recent(self):
+        # in the reversed array magnitudes increase toward the 1.0 at the end
         w = get_weights_ffd(0.5, size=20)
         for i in range(1, len(w)):
-            assert abs(w[i]) <= abs(w[i - 1]) + 1e-9
+            assert abs(w[i]) >= abs(w[i - 1]) - 1e-9
 
     def test_d_zero_returns_single_weight(self):
         w = get_weights_ffd(0.0, size=50)

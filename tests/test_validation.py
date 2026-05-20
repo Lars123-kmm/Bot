@@ -15,7 +15,8 @@ from src.ml.validation import (
 class TestDeflatedSharpeRatio:
     def test_single_trial_is_psr(self):
         """With n_trials=1, DSR == PSR (probability SR > 0)."""
-        dsr = deflated_sharpe_ratio(sr=1.0, t=252, n_trials=1)
+        # moderate SR/T so the probability stays strictly inside (0, 1)
+        dsr = deflated_sharpe_ratio(sr=0.2, t=100, n_trials=1)
         assert 0.0 < dsr < 1.0
 
     def test_positive_sr_above_half(self):
@@ -28,8 +29,9 @@ class TestDeflatedSharpeRatio:
 
     def test_more_trials_lowers_dsr(self):
         """More independent trials → higher expected SR* → lower DSR for same SR."""
-        dsr_1  = deflated_sharpe_ratio(sr=1.0, t=252, n_trials=1)
-        dsr_50 = deflated_sharpe_ratio(sr=1.0, t=252, n_trials=50)
+        # moderate SR/T so neither value saturates at 1.0
+        dsr_1  = deflated_sharpe_ratio(sr=0.3, t=120, n_trials=1)
+        dsr_50 = deflated_sharpe_ratio(sr=0.3, t=120, n_trials=50)
         assert dsr_50 < dsr_1
 
     def test_larger_t_raises_dsr(self):

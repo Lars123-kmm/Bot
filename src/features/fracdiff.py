@@ -38,7 +38,8 @@ def frac_diff_ffd(
         loc = series.index[i]
         window = series.iloc[i - width + 1: i + 1].values
         output[loc] = float(np.dot(w, window))
-    return pd.Series(output, dtype=float, name=series.name)
+    # Reindex to the full series: the first width-1 bars become leading NaNs.
+    return pd.Series(output, dtype=float, name=series.name).reindex(series.index)
 
 
 def find_min_d(
