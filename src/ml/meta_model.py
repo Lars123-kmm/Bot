@@ -54,7 +54,8 @@ class MetaModel:
         sample_weight: Optional López-de-Prado Sample-Uniqueness-Gewichte
         """
         X_feat = self._select_features(X)
-        X_scaled = self._scaler.fit_transform(X_feat)
+        # np.asarray ensures numpy (not DataFrame) so LightGBM doesn't set feature_names_in_
+        X_scaled = np.asarray(self._scaler.fit_transform(X_feat))
 
         sw = None
         if sample_weight is not None:
@@ -109,7 +110,7 @@ class MetaModel:
         """
         self._require_fitted()
         X_feat = self._select_features(X)
-        X_scaled = self._scaler.transform(X_feat)
+        X_scaled = np.asarray(self._scaler.transform(X_feat))
         return self._model.predict_proba(X_scaled)[:, 1]
 
     def is_tradeable(self, X_row: pd.DataFrame) -> Tuple[bool, float]:

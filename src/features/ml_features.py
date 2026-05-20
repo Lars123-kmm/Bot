@@ -155,7 +155,7 @@ def _fracdiff_feature(series: pd.Series, cfg: Dict[str, Any]) -> pd.Series:
         else:
             d = 0.3
         cfg["fracdiff_d"] = d
-    return frac_diff_ffd(series, float(d)).fillna(0.0)
+    return frac_diff_ffd(series, float(d), max_width=100)
 
 
 def _require_cols(df: pd.DataFrame, cols: list) -> None:

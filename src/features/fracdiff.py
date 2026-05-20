@@ -16,12 +16,22 @@ def get_weights_ffd(d: float, size: int, thres: float = 1e-5) -> np.ndarray:
     return np.array(w[::-1])
 
 
-def frac_diff_ffd(series: pd.Series, d: float, thres: float = 1e-5) -> pd.Series:
+def frac_diff_ffd(
+    series: pd.Series,
+    d: float,
+    thres: float = 1e-5,
+    max_width: int = 100,
+) -> pd.Series:
     """
     Fractionally differenced series using Fixed-Width Window method.
     d=0 → original, d=1 → first difference. Preserves more memory than d=1.
+
+    max_width caps the convolution window so the first max_width-1 bars
+    produce valid output (instead of size-1 bars with default thres stopping).
+    For d < 0.5 the weights decay very slowly; without max_width the window
+    would span nearly the full series and discard almost all rows.
     """
-    w = get_weights_ffd(d, len(series), thres)
+    w = get_weights_ffd(d, min(len(series), max_width), thres)
     width = len(w)
     output = {}
     for i in range(width - 1, len(series)):
