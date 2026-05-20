@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from src.features.data_prep import prepare_market_data
 from src.features.indicators import compute_indicators
 from src.features.ml_features import ML_FEATURE_COLS, build_ml_features
 from src.ml.labeling import purge_overlap, triple_barrier_labels
@@ -67,8 +68,9 @@ def walk_forward_train(
     step_bars = step_bars or int(ml_cfg.get("step_bars", 250))
     purge_bars = purge_bars or int(ml_cfg.get("purge_bars", 48))
 
-    # Indikatoren + Signale + ML-Features einmalig berechnen
+    # Daten-Vorverarbeitung (Bar-Typ, Binance, HMM) + Indikatoren + Features
     logger.info("Berechne Indikatoren und ML-Features für Walk-Forward...")
+    df = prepare_market_data(df, cfg)
     df_ind = compute_indicators(df, cfg)
     df_sig = generate_signals(df_ind, cfg)
     df_feat = build_ml_features(df_sig, cfg)

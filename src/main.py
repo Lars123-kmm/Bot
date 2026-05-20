@@ -48,6 +48,8 @@ def _parse_args() -> argparse.Namespace:
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument("--use-ml", action="store_true",
                         help="ML-Filter im Backtest aktivieren (Modell muss vorher trainiert sein)")
+    parser.add_argument("--bar-type", default=None, choices=["time", "dollar", "volume"],
+                        help="Überschreibt bars.type aus der Config (Standard: Config-Wert)")
     parser.add_argument("--trials", type=int, default=50,
                         help="Anzahl Optuna-Trials für --mode optimize")
     return parser.parse_args()
@@ -57,6 +59,7 @@ def run_backtest(cfg: dict, args: argparse.Namespace) -> None:
     import pandas as pd
     from src.backtest.costs import CostModel
     from src.backtest.engine import run_backtest as _run
+    from src.features.data_prep import prepare_market_data
     from src.features.indicators import compute_indicators
     from src.strategies.ema_atr import generate_signals
 
@@ -90,6 +93,9 @@ def run_backtest(cfg: dict, args: argparse.Namespace) -> None:
             df = fetch_rates(fetch_cfg)
         finally:
             mt5_shutdown()
+
+    logger.info("Vorverarbeitung (Bar-Typ, Binance, HMM)...")
+    df = prepare_market_data(df, cfg)
 
     logger.info("Berechne Indikatoren...")
     df = compute_indicators(df, cfg)
@@ -236,6 +242,10 @@ def main() -> int:
     except (FileNotFoundError, ValueError) as exc:
         print(f"Config-Fehler: {exc}", file=sys.stderr)
         return 1
+
+    # CLI-Override: Bar-Typ
+    if args.bar_type is not None:
+        cfg.setdefault("bars", {})["type"] = args.bar_type
 
     mode_map = {
         "backtest": run_backtest,
