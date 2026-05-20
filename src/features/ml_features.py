@@ -132,7 +132,8 @@ def _garman_klass_vol(df: pd.DataFrame, window: int = 20) -> pd.Series:
     log_hl = np.log(df["high"] / df["low"]) ** 2
     log_co = np.log(df["close"] / df["open"]) ** 2
     gk = (0.5 * log_hl - (2 * np.log(2) - 1) * log_co).rolling(window).mean()
-    return np.sqrt(gk * 252).fillna(0.0)
+    # GK-Schätzer kann durch Schätzrauschen leicht negativ werden → auf 0 clippen
+    return np.sqrt(gk.clip(lower=0.0) * 252).fillna(0.0)
 
 
 def _parkinson_vol(df: pd.DataFrame, window: int = 20) -> pd.Series:
