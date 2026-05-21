@@ -36,6 +36,11 @@ class MetaModel:
         self._scaler = StandardScaler()
         self.feature_importances_: Optional[Dict[str, float]] = None
         self.train_metrics_: Dict[str, float] = {}
+        # Active feature list — may be a subset of ML_FEATURE_COLS when
+        # AdaptiveFeatureSelector has dropped low-importance features.
+        self.active_features_: list = list(
+            ml_cfg.get("active_features", None) or ML_FEATURE_COLS
+        )
 
     # ------------------------------------------------------------------
     # Training
@@ -95,16 +100,17 @@ class MetaModel:
                 self._model = base
 
         # Feature-Importance aus dem Base-Modell extrahieren
+        cols = self.active_features_
         if hasattr(self._model, "calibrated_classifiers_"):
             importances = np.mean([
                 c.estimator.feature_importances_
                 for c in self._model.calibrated_classifiers_
                 if hasattr(c.estimator, "feature_importances_")
             ], axis=0)
-            self.feature_importances_ = dict(zip(ML_FEATURE_COLS, importances.tolist()))
+            self.feature_importances_ = dict(zip(cols, importances.tolist()))
         elif hasattr(self._model, "feature_importances_"):
             self.feature_importances_ = dict(
-                zip(ML_FEATURE_COLS, self._model.feature_importances_.tolist())
+                zip(cols, self._model.feature_importances_.tolist())
             )
 
         # Trainings-Metriken
@@ -162,6 +168,7 @@ class MetaModel:
             "threshold": self.threshold,
             "feature_importances": self.feature_importances_,
             "train_metrics": self.train_metrics_,
+            "active_features": self.active_features_,
         }, path)
         logger.info("MetaModel gespeichert: %s", path)
 
@@ -172,8 +179,9 @@ class MetaModel:
         self.threshold = data.get("threshold", self.threshold)
         self.feature_importances_ = data.get("feature_importances")
         self.train_metrics_ = data.get("train_metrics", {})
-        logger.info("MetaModel geladen: %s (AUC=%.3f)", path,
-                    self.train_metrics_.get("auc", 0))
+        self.active_features_ = data.get("active_features", list(ML_FEATURE_COLS))
+        logger.info("MetaModel geladen: %s (AUC=%.3f, features=%d)", path,
+                    self.train_metrics_.get("auc", 0), len(self.active_features_))
         return self
 
     # ------------------------------------------------------------------
@@ -181,10 +189,11 @@ class MetaModel:
     # ------------------------------------------------------------------
 
     def _select_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        missing = [c for c in ML_FEATURE_COLS if c not in X.columns]
+        cols = self.active_features_
+        missing = [c for c in cols if c not in X.columns]
         if missing:
             raise ValueError(f"Fehlende ML-Feature-Spalten: {missing}")
-        return X[ML_FEATURE_COLS].copy()
+        return X[cols].copy()
 
     def _require_fitted(self) -> None:
         if self._model is None:

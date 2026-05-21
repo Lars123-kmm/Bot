@@ -150,3 +150,22 @@ dashboard:
 # ---- Telegram-Benachrichtigungen ----
 notifications:
   enabled: false              # true + TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID env-vars
+
+# ---- Autonomes Lernen (AutoML + Adaptive Features) ----
+automl:
+  # Pfade für persistente Datenbanken (wachsen über Sessions)
+  data_store_path: "data/trade_history.db"
+  feature_db_path: "data/feature_importance.db"
+
+  # Optuna HPO: Anzahl Trials pro Retrain-Zyklus
+  # Mehr Trades → Optuna findet bessere Parameter → exponentieller Compounding-Effekt
+  n_trials: 40                # 40 = ~2 min; 100 = ~5 min für größere Datensätze
+
+  # Mindest-Anzahl abgeschlossener Trades bevor HPO aktiviert wird
+  min_samples: 50             # Erst nach 50 echten Trades hat Optuna genug Signal
+
+  # Feature-Dropout: Features die über min_cycles_to_drop aufeinanderfolgende
+  # Retrain-Zyklen im untersten drop_percentile landen, werden gedroppt
+  drop_percentile: 0.10       # Unterste 10% pro Zyklus = "schwaches" Feature
+  min_cycles_to_drop: 3       # Schwach für 3 Zyklen → wird gedroppt
+  recovery_cycles: 2          # Wieder stark für 2 Zyklen → wird rehabilitiert

@@ -32,6 +32,9 @@ from src.Execution.order_state import ActiveTrade
 from src.features.data_prep import prepare_market_data
 from src.features.indicators import compute_indicators
 from src.features.ml_features import ML_FEATURE_COLS, build_ml_features
+from src.ml.adaptive_features import AdaptiveFeatureSelector
+from src.ml.automl import autotune_lgbm, merge_params
+from src.ml.data_store import TradeDataStore
 from src.ml.model_store import ModelStore
 from src.ml.online_model import OnlineMetaFilter
 from src.risk.guards import ConsecutiveLossGuard, DrawdownGuard
@@ -152,6 +155,20 @@ class LiveRunner:
         self._trade_logger = (
             TradeLogger(report_dir) if report_dir is not None else None
         )
+
+        # --- Autonomous learning infrastructure ---
+        automl_cfg = cfg.get("automl", {})
+        store_path = automl_cfg.get("data_store_path", "data/trade_history.db")
+        feat_path = automl_cfg.get("feature_db_path", "data/feature_importance.db")
+        self._data_store = TradeDataStore(path=store_path)
+        self._feature_selector = AdaptiveFeatureSelector(
+            path=feat_path,
+            drop_percentile=float(automl_cfg.get("drop_percentile", 0.10)),
+            min_cycles_to_drop=int(automl_cfg.get("min_cycles_to_drop", 3)),
+            recovery_cycles=int(automl_cfg.get("recovery_cycles", 2)),
+        )
+        self._automl_trials = int(automl_cfg.get("n_trials", 40))
+        self._automl_min_samples = int(automl_cfg.get("min_samples", 50))
 
         # --- Dashboard ---
         dash_cfg = cfg.get("dashboard", {})
@@ -371,6 +388,18 @@ class LiveRunner:
         state._entry_ticket = ticket
         state._entry_features = self._extract_features(last_bar)
 
+        # Persist entry features — outcome will be filled in on close
+        try:
+            self._data_store.log_entry(
+                symbol=symbol,
+                bar_time=last_bar.name if hasattr(last_bar, "name") else "",
+                direction=direction,
+                features=state._entry_features,
+                ticket=ticket,
+            )
+        except Exception as exc:
+            logger.warning("DataStore.log_entry failed: %s", exc)
+
         logger.info(
             "%s OPEN dir=%d size=%.6f @ %.5f sl=%.5f tp=%.5f prob=%s",
             symbol, direction, pos["size"], price, pos["stop"], pos["take_profit"],
@@ -395,6 +424,13 @@ class LiveRunner:
                 state.online_filter.partial_fit(state._entry_features, outcome)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Online filter update failed: %s", exc)
+
+        # Write realized outcome back to persistent store (feeds next HPO run)
+        if state._entry_ticket is not None:
+            try:
+                self._data_store.update_outcome(state._entry_ticket, outcome, pnl)
+            except Exception as exc:
+                logger.warning("DataStore.update_outcome failed: %s", exc)
 
         if self._trade_logger is not None:
             self._trade_logger.log(trade)
@@ -542,6 +578,7 @@ class LiveRunner:
     def _retrain(self) -> None:
         from src.ml.walk_forward import walk_forward_train
 
+        # ── Step 1: Fetch market data ──────────────────────────────────
         dfs = []
         for sym in self.symbols:
             try:
@@ -558,19 +595,77 @@ class LiveRunner:
             return
 
         combined = pd.concat(dfs).sort_index()
-        logger.info("Retraining on %d bars from %d symbols...", len(combined), len(dfs))
+
+        # ── Step 2: AutoML — tune LightGBM on real trade outcomes ─────
+        # Real-trade data has better signal than synthetic triple-barrier
+        # labels, so we use it for HPO when enough samples exist.
+        tuned_cfg = self.cfg
+        real_data = self._data_store.get_training_data(
+            min_samples=self._automl_min_samples
+        )
+        if real_data is not None:
+            X_real, y_real = real_data
+            logger.info(
+                "AutoML HPO on %d real trades (%d trials)...",
+                len(X_real), self._automl_trials,
+            )
+            best_params = autotune_lgbm(
+                X_real, y_real, n_trials=self._automl_trials
+            )
+            tuned_cfg = merge_params(self.cfg, best_params)
+            logger.info("AutoML complete — injecting best params: %s", best_params)
+            self._notifier.info(
+                f"AutoML: beste LightGBM-Params gefunden"
+                f" (leaves={best_params.get('lgbm_num_leaves')},"
+                f" lr={best_params.get('lgbm_learning_rate'):.4f})"
+            )
+        else:
+            logger.info("AutoML skipped — not enough real-trade samples yet.")
+
+        # ── Step 3: Inject active features from AdaptiveFeatureSelector ─
+        active_feats = self._feature_selector.get_active_features()
+        tuned_cfg.setdefault("ml", {})["active_features"] = active_feats
+        if len(active_feats) < len(ML_FEATURE_COLS):
+            logger.info(
+                "Using %d/%d active features (dropped: %s)",
+                len(active_feats), len(ML_FEATURE_COLS),
+                self._feature_selector.dropped_features(),
+            )
+
+        # ── Step 4: Walk-Forward train with tuned config ───────────────
+        logger.info(
+            "Walk-forward retrain: %d bars, %d symbols...",
+            len(combined), len(dfs),
+        )
         try:
-            best_model, results = walk_forward_train(combined, self.cfg)
-            avg_auc = sum(r.test_metrics.get("auc", 0) for r in results) / max(len(results), 1)
+            best_model, results = walk_forward_train(combined, tuned_cfg)
+            avg_auc = sum(
+                r.test_metrics.get("auc", 0) for r in results
+            ) / max(len(results), 1)
+
+            # ── Step 5: Update adaptive feature selector ───────────────
+            try:
+                self._feature_selector.update(best_model)
+            except Exception as exc:
+                logger.warning("AdaptiveFeatureSelector.update failed: %s", exc)
+
             self._store.save(best_model, metadata={
                 "description": f"Auto-retrain bar {self._total_bars}",
                 "avg_test_auc": round(avg_auc, 4),
                 "n_folds": len(results),
                 "champion_status": "champion",
+                "active_features": len(active_feats),
+                "automl_used": real_data is not None,
             })
             self._meta_model = best_model
-            logger.info("Retrain complete. avg_test_auc=%.4f", avg_auc)
-            self._notifier.info(f"Retraining fertig — avg Test-AUC {avg_auc:.3f}")
+            logger.info(
+                "Retrain complete: avg_test_auc=%.4f, active_features=%d/%d",
+                avg_auc, len(active_feats), len(ML_FEATURE_COLS),
+            )
+            self._notifier.info(
+                f"Retraining fertig — AUC {avg_auc:.3f},"
+                f" {len(active_feats)} aktive Features"
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("Retrain failed: %s", exc, exc_info=True)
             self._notifier.error(f"Retraining fehlgeschlagen: {exc}")
@@ -595,6 +690,12 @@ class LiveRunner:
             "win_rate": summary.get("win_rate", 0.0),
             "positions": self.broker.get_open_positions(),
             "recent_trades": list(self._recent_closed),
+            "autonomous_learning": {
+                "data_store": self._data_store.stats(),
+                "active_features": len(self._feature_selector.get_active_features()),
+                "total_features": len(ML_FEATURE_COLS),
+                "dropped_features": self._feature_selector.dropped_features(),
+            },
         }
 
     def _maybe_send_daily_summary(self) -> None:
