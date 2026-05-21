@@ -126,7 +126,8 @@ live:
   spread_pct: 0.0001
 
   # Auto-Retrain: Bars zwischen Walk-Forward-Retrains (0 = aus)
-  retrain_every: 0
+  # 168 = einmal pro Woche bei H1-Bars; 720 = einmal pro Monat
+  retrain_every: 168
 
   # Modell-Degradations-Erkennung: Retrain wenn Win-Rate der letzten
   # N Trades unter den Schwellwert fällt
