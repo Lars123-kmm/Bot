@@ -151,6 +151,16 @@ dashboard:
 notifications:
   enabled: false              # true + TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID env-vars
 
+# ---- Markteffizenz-Analyse ----
+analysis:
+  efficiency:
+    db_path: "data/efficiency_history.db"
+    window: 252             # Rolling-Window für alle Tests (Bars)
+
+    # Optionaler Handels-Filter: Trades sperren wenn Markt zu effizient
+    filter_trades: false    # true = kein Trade wenn composite > max_score
+    max_score: 0.75         # 0.75 = "weitgehend effizient" → kein Edge
+
 # ---- Autonomes Lernen (AutoML + Adaptive Features) ----
 automl:
   # Pfade für persistente Datenbanken (wachsen über Sessions)

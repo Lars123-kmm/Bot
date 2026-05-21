@@ -37,6 +37,7 @@ from src.ml.automl import autotune_lgbm, merge_params
 from src.ml.data_store import TradeDataStore
 from src.ml.model_store import ModelStore
 from src.ml.online_model import OnlineMetaFilter
+from src.analysis.efficiency import EfficiencyTracker
 from src.risk.guards import ConsecutiveLossGuard, DrawdownGuard
 from src.risk.sizing import calculate_position, probability_scaled_position
 from src.runner.dashboard import DashboardServer
@@ -156,6 +157,15 @@ class LiveRunner:
             TradeLogger(report_dir) if report_dir is not None else None
         )
 
+        # --- Efficiency tracker ---
+        eff_cfg = cfg.get("analysis", {}).get("efficiency", {})
+        self._efficiency = EfficiencyTracker(
+            path=eff_cfg.get("db_path", "data/efficiency_history.db"),
+            window=int(eff_cfg.get("window", 252)),
+        )
+        self._eff_filter_enabled = bool(eff_cfg.get("filter_trades", False))
+        self._eff_max_score = float(eff_cfg.get("max_score", 0.75))
+
         # --- Autonomous learning infrastructure ---
         automl_cfg = cfg.get("automl", {})
         store_path = automl_cfg.get("data_store_path", "data/trade_history.db")
@@ -274,6 +284,12 @@ class LiveRunner:
         df = compute_indicators(df, self.cfg)
         df = generate_signals(df, self.cfg)
 
+        # Efficiency update (non-blocking — runs every bar for trend tracking)
+        try:
+            self._efficiency.update(symbol, df["close"])
+        except Exception as exc:
+            logger.debug("EfficiencyTracker update failed for %s: %s", symbol, exc)
+
         last = df.iloc[-1]
         signal = int(last.get("signal", 0))
         atr = float(last.get("atr", 0.0))
@@ -291,6 +307,16 @@ class LiveRunner:
             if not self._loss_guard.is_allowed():
                 logger.warning("%s: loss guard active — skipping signal.", symbol)
                 return
+
+            # Efficiency filter (optional — blocks trades when market is too efficient)
+            if self._eff_filter_enabled:
+                eff_score = self._efficiency.current_score(symbol)
+                if eff_score is not None and eff_score > self._eff_max_score:
+                    logger.info(
+                        "%s: efficiency filter blocked (score=%.3f > %.2f)",
+                        symbol, eff_score, self._eff_max_score,
+                    )
+                    return
 
             # Multi-timeframe filter
             if self._mtf_enabled:
@@ -696,6 +722,7 @@ class LiveRunner:
                 "total_features": len(ML_FEATURE_COLS),
                 "dropped_features": self._feature_selector.dropped_features(),
             },
+            "efficiency": self._efficiency.summary(),
         }
 
     def _maybe_send_daily_summary(self) -> None:
