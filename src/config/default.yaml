@@ -152,6 +152,12 @@ dashboard:
 notifications:
   enabled: false              # true + TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID env-vars
 
+# ---- Korrelations-Filter ----
+correlation:
+  enabled: true
+  max_correlation: 0.85   # Keine zwei gleich-direktionalen Positionen wenn r > 0.85
+  window: 48              # Bars für die Korrelationsberechnung (48h bei H1)
+
 # ---- Markteffizenz-Analyse ----
 analysis:
   efficiency:

@@ -166,6 +166,13 @@ class LiveRunner:
         self._eff_filter_enabled = bool(eff_cfg.get("filter_trades", False))
         self._eff_max_score = float(eff_cfg.get("max_score", 0.75))
 
+        # --- Correlation filter ---
+        corr_cfg = cfg.get("correlation", {})
+        self._corr_enabled = bool(corr_cfg.get("enabled", True))
+        self._corr_threshold = float(corr_cfg.get("max_correlation", 0.85))
+        self._corr_window = int(corr_cfg.get("window", 48))
+        self._returns_cache: Dict[str, pd.Series] = {}
+
         # --- Autonomous learning infrastructure ---
         automl_cfg = cfg.get("automl", {})
         store_path = automl_cfg.get("data_store_path", "data/trade_history.db")
@@ -290,6 +297,10 @@ class LiveRunner:
         except Exception as exc:
             logger.debug("EfficiencyTracker update failed for %s: %s", symbol, exc)
 
+        # Cache recent returns for correlation filter
+        log_ret = df["close"].pct_change().dropna().iloc[-self._corr_window:]
+        self._returns_cache[symbol] = log_ret
+
         last = df.iloc[-1]
         signal = int(last.get("signal", 0))
         atr = float(last.get("atr", 0.0))
@@ -306,6 +317,10 @@ class LiveRunner:
                 return
             if not self._loss_guard.is_allowed():
                 logger.warning("%s: loss guard active — skipping signal.", symbol)
+                return
+
+            # Correlation filter — skip if too correlated with an existing open position
+            if self._corr_enabled and self._is_correlated(symbol, signal):
                 return
 
             # Efficiency filter (optional — blocks trades when market is too efficient)
@@ -572,6 +587,36 @@ class LiveRunner:
             logger.warning("Higher-TF trend fetch failed for %s: %s", symbol, exc)
             return 0
 
+    def _is_correlated(self, symbol: str, direction: int) -> bool:
+        """
+        Returns True if opening this trade would create redundant correlated exposure.
+        Checks rolling return correlation against all symbols with open positions
+        in the same direction. Opposite direction = hedge = allowed.
+        """
+        r_new = self._returns_cache.get(symbol)
+        if r_new is None or len(r_new) < 10:
+            return False
+
+        for other_sym, other_state in self._states.items():
+            if other_sym == symbol or other_state.active_trade is None:
+                continue
+            if other_state.active_trade.direction != direction:
+                continue  # opposite direction = hedge, allow it
+            r_other = self._returns_cache.get(other_sym)
+            if r_other is None or len(r_other) < 10:
+                continue
+            common = r_new.index.intersection(r_other.index)
+            if len(common) < 10:
+                continue
+            corr = float(r_new.loc[common].corr(r_other.loc[common]))
+            if corr > self._corr_threshold:
+                logger.info(
+                    "%s: correlation filter blocked — corr(%.2f) with open %s",
+                    symbol, corr, other_sym,
+                )
+                return True
+        return False
+
     def _load_model(self):
         try:
             model, info = self._store.load_champion(self.cfg)
@@ -692,6 +737,7 @@ class LiveRunner:
                 f"Retraining fertig — AUC {avg_auc:.3f},"
                 f" {len(active_feats)} aktive Features"
             )
+            self._generate_report()
         except Exception as exc:  # noqa: BLE001
             logger.error("Retrain failed: %s", exc, exc_info=True)
             self._notifier.error(f"Retraining fehlgeschlagen: {exc}")
@@ -725,6 +771,33 @@ class LiveRunner:
             "efficiency": self._efficiency.summary(),
         }
 
+    def _generate_report(self) -> None:
+        """Generate equity HTML report — called after retrain and daily."""
+        if not isinstance(self.broker, PaperBroker):
+            return
+        try:
+            from src.reporting.equity_report import generate_report
+            trades = self.broker.get_all_closed_trades()
+            fi = self._meta_model.feature_importances_ if self._meta_model else None
+            eff_hist: Dict[str, list] = {}
+            for sym in self.symbols:
+                df_h = self._efficiency.get_history(sym, n=200)
+                if not df_h.empty:
+                    eff_hist[sym] = df_h[["ts", "composite"]].rename(
+                        columns={"ts": "ts", "composite": "composite"}
+                    ).to_dict("records")
+            path = generate_report(
+                trades=trades,
+                initial_capital=self.broker.get_account_info()["balance"],
+                output_path="reports/equity_report.html",
+                feature_importances=fi,
+                efficiency_history=eff_hist or None,
+                symbols=self.symbols,
+            )
+            logger.info("Report generated: %s", path)
+        except Exception as exc:
+            logger.warning("Report generation failed: %s", exc)
+
     def _maybe_send_daily_summary(self) -> None:
         today = datetime.now(timezone.utc).date()
         if today == self._last_summary_date:
@@ -732,6 +805,7 @@ class LiveRunner:
         self._last_summary_date = today
         if isinstance(self.broker, PaperBroker):
             self._notifier.daily_summary(self.broker.summary())
+            self._generate_report()
 
     # ------------------------------------------------------------------
     # Shutdown
