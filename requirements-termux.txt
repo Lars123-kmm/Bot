@@ -1,4 +1,3 @@
-MetaTrader5
 pandas
 numpy
 PyYAML
@@ -7,8 +6,8 @@ lightgbm
 optuna
 scipy
 statsmodels
-shap
 hmmlearn
 ccxt
 river
 joblib
+requests
