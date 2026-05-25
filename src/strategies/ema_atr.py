@@ -9,6 +9,24 @@ if TYPE_CHECKING:
     from src.ml.meta_model import MetaModel
 
 
+def generate_raw_signals(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Nur EMA-Crossovers ohne Filter — für ML-Training (Meta-Labeling).
+    Das ML-Modell lernt, welche dieser Rohsignale profitabel sind.
+    """
+    out = df.copy()
+    required = ["cross_up", "cross_dn"]
+    missing = [c for c in required if c not in out.columns]
+    if missing:
+        raise ValueError(f"Fehlende Spalten: {missing}. compute_indicators() zuerst aufrufen.")
+
+    out["signal"] = 0
+    out.loc[out["cross_up"], "signal"] = 1
+    out.loc[out["cross_dn"], "signal"] = -1
+    out["signal"] = out["signal"].shift(1).fillna(0).astype(int)
+    return out
+
+
 def generate_signals(df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
     Erzeugt Handelssignale basierend auf dem Multi-Filter EMA-Crossover-System.

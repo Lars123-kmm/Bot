@@ -15,9 +15,11 @@ def get_t1(
     """
     t1 = {}
     for t0 in signal_idx:
-        pos = close_idx.get_loc(t0) if t0 in close_idx else None
-        if pos is None:
+        if t0 not in close_idx:
             continue
+        loc = close_idx.get_loc(t0)
+        # get_loc returns a slice when the index has duplicate timestamps
+        pos = loc.start if isinstance(loc, slice) else int(loc)
         end_pos = min(pos + max_bars, len(close_idx) - 1)
         t1[t0] = close_idx[end_pos]
     return pd.Series(t1)

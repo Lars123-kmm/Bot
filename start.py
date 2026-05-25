@@ -3,6 +3,7 @@
 start.py — Startdatei für den ML-Trading-Bot
 Ausführen: python start.py
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -53,8 +54,14 @@ def ask_symbols() -> str:
 
 
 def run(cmd: list[str]) -> None:
+    # Replace sys.executable with the Python that launched start.py
+    cmd = [sys.executable if c == sys.executable else c for c in cmd]
     print(f"\n  Starte: {' '.join(cmd)}\n")
-    subprocess.run(cmd, cwd=ROOT)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ROOT)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["OMP_NUM_THREADS"] = "8"
+    subprocess.run(cmd, cwd=ROOT, env=env)
 
 
 def main():
@@ -62,7 +69,7 @@ def main():
         choice = menu()
 
         if choice == "0":
-            print("\n  Auf Wiedersehen.\n")
+            print("\n  Auf Wiedersehen Lars.\n")
             break
 
         elif choice == "1":

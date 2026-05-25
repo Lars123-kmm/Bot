@@ -28,6 +28,7 @@ from typing import Any, Deque, Dict, List, Optional
 import pandas as pd
 
 from src.data.binance_fetch import BinanceFetcher
+from src.data.bar_store import BarStore
 from src.Execution.order_state import ActiveTrade
 from src.features.data_prep import prepare_market_data
 from src.features.indicators import compute_indicators
@@ -178,6 +179,7 @@ class LiveRunner:
         store_path = automl_cfg.get("data_store_path", "data/trade_history.db")
         feat_path = automl_cfg.get("feature_db_path", "data/feature_importance.db")
         self._data_store = TradeDataStore(path=store_path)
+        self._bar_store = BarStore(path=automl_cfg.get("bar_db_path", "data/bars.db"))
         self._feature_selector = AdaptiveFeatureSelector(
             path=feat_path,
             drop_percentile=float(automl_cfg.get("drop_percentile", 0.10)),
@@ -213,6 +215,10 @@ class LiveRunner:
         logger.info("=== LiveRunner started (mode=%s) — Ctrl+C to stop ===", self.mode)
         if self._dashboard is not None:
             self._dashboard.start()
+
+        logger.info("Startup-Training: lade Daten und trainiere ML-Modell...")
+        self._retrain()
+
         self._notifier.info(
             f"Bot gestartet — Modus {self.mode}, Symbole {', '.join(self.symbols)}"
         )
@@ -300,6 +306,13 @@ class LiveRunner:
         # Cache recent returns for correlation filter
         log_ret = df["close"].pct_change().dropna().iloc[-self._corr_window:]
         self._returns_cache[symbol] = log_ret
+
+        # Persist latest bar to live database
+        try:
+            eff_score = self._efficiency.current_score(symbol)
+            self._bar_store.append(symbol, df, efficiency_score=eff_score, n_latest=1)
+        except Exception as exc:
+            logger.debug("BarStore.append failed: %s", exc)
 
         last = df.iloc[-1]
         signal = int(last.get("signal", 0))
@@ -666,6 +679,7 @@ class LiveRunner:
             return
 
         combined = pd.concat(dfs).sort_index()
+        combined = combined[~combined.index.duplicated(keep="first")]
 
         # ── Step 2: AutoML — tune LightGBM on real trade outcomes ─────
         # Real-trade data has better signal than synthetic triple-barrier
@@ -771,10 +785,10 @@ class LiveRunner:
             "efficiency": self._efficiency.summary(),
         }
 
-    def _generate_report(self) -> None:
+    def _generate_report(self) -> Optional[str]:
         """Generate equity HTML report — called after retrain and daily."""
         if not isinstance(self.broker, PaperBroker):
-            return
+            return None
         try:
             from src.reporting.equity_report import generate_report
             trades = self.broker.get_all_closed_trades()
@@ -795,8 +809,10 @@ class LiveRunner:
                 symbols=self.symbols,
             )
             logger.info("Report generated: %s", path)
+            return path
         except Exception as exc:
             logger.warning("Report generation failed: %s", exc)
+            return None
 
     def _maybe_send_daily_summary(self) -> None:
         today = datetime.now(timezone.utc).date()
@@ -829,4 +845,7 @@ class LiveRunner:
             print(f"  Avg PnL:      {summary['avg_pnl']:>12.4f} USD")
             print("=" * 50 + "\n")
             self._notifier.daily_summary(summary)
+            report_path = self._generate_report()
+            if report_path:
+                print(f"  Report:  {report_path}\n")
         self._notifier.info("Bot gestoppt.")

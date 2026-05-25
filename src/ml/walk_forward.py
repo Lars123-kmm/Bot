@@ -13,7 +13,7 @@ from src.ml.labeling import purge_overlap, triple_barrier_labels
 from src.ml.meta_model import MetaModel
 from src.ml.sample_weights import compute_sample_weights
 from src.ml.validation import deflated_sharpe_ratio, probability_of_backtest_overfitting
-from src.strategies.ema_atr import generate_signals
+from src.strategies.ema_atr import generate_raw_signals, generate_signals
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,8 @@ def walk_forward_train(
     logger.info("Berechne Indikatoren und ML-Features für Walk-Forward...")
     df = prepare_market_data(df, cfg)
     df_ind = compute_indicators(df, cfg)
-    df_sig = generate_signals(df_ind, cfg)
+    # Rohe EMA-Crossovers für Labeling: das ML-Modell lernt, welche gut sind
+    df_sig = generate_raw_signals(df_ind)
     df_feat = build_ml_features(df_sig, cfg)
 
     results: List[WalkForwardResult] = []
@@ -96,7 +97,7 @@ def walk_forward_train(
 
         # Labels für Train-Set
         train_signal_mask = (train_df["signal"] != 0)
-        if train_signal_mask.sum() < 10:
+        if train_signal_mask.sum() < 3:
             logger.warning("Fold %d: zu wenige Signale im Train-Set (%d). Übersprungen.",
                            fold, train_signal_mask.sum())
             start += step_bars
@@ -113,7 +114,7 @@ def walk_forward_train(
         X_train_raw, y_train_labels = purge_overlap(train_labels, train_df,
                                                      max_bars=int(ml_cfg.get("label_max_bars", 48)))
 
-        if len(y_train_labels) < 10:
+        if len(y_train_labels) < 3:
             logger.warning("Fold %d: nach Purging zu wenige Labels (%d). Übersprungen.",
                            fold, len(y_train_labels))
             start += step_bars
@@ -138,17 +139,17 @@ def walk_forward_train(
         test_signal_mask = (test_df["signal"] != 0)
         test_metrics = {"auc": 0.0, "n_signals": int(test_signal_mask.sum())}
 
-        if test_signal_mask.sum() >= 5:
+        if test_signal_mask.sum() >= 3:
             test_labels = triple_barrier_labels(
                 test_df, test_signal_mask,
                 upper_mult=float(ml_cfg.get("label_upper_mult", 2.0)),
                 lower_mult=float(ml_cfg.get("label_lower_mult", 2.0)),
                 max_bars=int(ml_cfg.get("label_max_bars", 48)),
             )
-            if len(test_labels) >= 5:
+            if len(test_labels) >= 3:
                 X_test = test_df.loc[test_labels.index, ML_FEATURE_COLS].dropna()
                 y_test = test_labels.loc[X_test.index, "label"]
-                if len(y_test) >= 5 and y_test.nunique() > 1:
+                if len(y_test) >= 3 and y_test.nunique() > 1:
                     probas = model.predict_proba(X_test)
                     from sklearn.metrics import roc_auc_score
                     auc = float(roc_auc_score(y_test, probas))
@@ -200,8 +201,41 @@ def walk_forward_train(
         fold += 1
 
     if not results:
-        raise RuntimeError("Walk-Forward: kein einziger Fold konnte trainiert werden. "
-                           "Mehr Daten oder kleinere train_bars/test_bars verwenden.")
+        # Fallback: train one model on every signal in the full dataset.
+        # This avoids a hard crash when the market is strongly trending and EMA
+        # crossovers are too rare to fill individual walk-forward windows.
+        all_signal_mask = (df_feat["signal"] != 0)
+        n_total = int(all_signal_mask.sum())
+        if n_total < 2:
+            raise RuntimeError(
+                "Walk-Forward: kein Fold trainierbar UND zu wenige Gesamtsignale "
+                f"({n_total}). Kleinere EMA-Perioden oder mehr Daten verwenden."
+            )
+        logger.warning(
+            "Walk-Forward: kein Fold mit >=3 Signalen. "
+            "Fallback: Ein-Schuss-Training auf %d Gesamtsignalen.", n_total
+        )
+        all_labels = triple_barrier_labels(
+            df_feat, all_signal_mask,
+            upper_mult=float(ml_cfg.get("label_upper_mult", 2.0)),
+            lower_mult=float(ml_cfg.get("label_lower_mult", 2.0)),
+            max_bars=int(ml_cfg.get("label_max_bars", 48)),
+        )
+        x_all_raw, y_all_labels = purge_overlap(
+            all_labels, df_feat, max_bars=int(ml_cfg.get("label_max_bars", 48))
+        )
+        if len(y_all_labels) < 2:
+            raise RuntimeError(
+                f"Walk-Forward: nach Fallback-Purging zu wenige Labels ({len(y_all_labels)})."
+            )
+        X_all = df_feat.loc[x_all_raw.index, ML_FEATURE_COLS]
+        y_all = y_all_labels["label"]
+        sw_all = compute_sample_weights(
+            y_all_labels, df_feat.index, max_bars=int(ml_cfg.get("label_max_bars", 48))
+        )
+        best_model = MetaModel(cfg)
+        best_model.fit(X_all, y_all, sample_weight=sw_all)
+        oos_sharpes = [0.0]
 
     if best_model is None:
         best_model = results[-1].model

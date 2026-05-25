@@ -116,12 +116,19 @@ def purge_overlap(
     keep_idx = []
     last_exit_pos = -1
 
-    label_positions = [feature_df.index.get_loc(ts) for ts in labels.index
-                       if ts in feature_df.index]
+    label_positions = []
+    valid_label_ts = []
+    for ts in labels.index:
+        if ts in feature_df.index:
+            loc = feature_df.index.get_loc(ts)
+            # get_loc returns a slice when the index has duplicate timestamps
+            pos = loc.start if isinstance(loc, slice) else int(loc)
+            label_positions.append(pos)
+            valid_label_ts.append(ts)
 
     for i, pos in enumerate(label_positions):
         if pos > last_exit_pos:
-            keep_idx.append(labels.index[i])
+            keep_idx.append(valid_label_ts[i])
             last_exit_pos = pos + max_bars
 
     labels_purged = labels.loc[keep_idx]

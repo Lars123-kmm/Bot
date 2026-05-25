@@ -75,7 +75,7 @@ def main() -> None:
     try:
         best_model, results = walk_forward_train(combined, cfg)
     except RuntimeError as exc:
-        logger.error("Training fehlgeschlagen: %s", exc)
+        logger.exception("Training fehlgeschlagen: %s", exc)
         logger.error(
             "Tipp: Zu wenige Signale pro Fold. Lösung:\n"
             "  1. Mehr Bars laden (--bars 8000)\n"

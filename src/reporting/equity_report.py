@@ -22,6 +22,12 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _json_default(obj: object) -> str:
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    return str(obj)
+
+
 def generate_report(
     trades: List[Dict[str, Any]],
     initial_capital: float,
@@ -58,7 +64,7 @@ def generate_report(
     feat_labels = feat_values = "[]"
     if feature_importances:
         top = sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:15]
-        feat_labels = json.dumps([k for k, _ in top])
+        feat_labels = json.dumps([k for k, _ in top], default=_json_default)
         feat_values = json.dumps([round(v, 2) for _, v in top])
 
     eff_datasets = "[]"
@@ -76,15 +82,15 @@ def generate_report(
                 "pointRadius": 1,
                 "fill": False,
             })
-        eff_datasets = json.dumps(datasets)
+        eff_datasets = json.dumps(datasets, default=_json_default)
 
     # ── Render HTML ───────────────────────────────────────────────────
     html = _render_html(
         summary=summary,
-        equity_labels=json.dumps(equity_labels),
+        equity_labels=json.dumps(equity_labels, default=_json_default),
         equity_data=json.dumps([round(v, 2) for v in equity_data]),
         dd_data=json.dumps([round(v * 100, 2) for v in dd_data]),
-        winrate_labels=json.dumps(winrate_labels),
+        winrate_labels=json.dumps(winrate_labels, default=_json_default),
         winrate_data=json.dumps([round(v * 100, 1) for v in winrate_data]),
         pnl_buckets=json.dumps([round(b, 1) for b in pnl_buckets]),
         pnl_counts=json.dumps(pnl_counts),

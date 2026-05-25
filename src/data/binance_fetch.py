@@ -109,10 +109,10 @@ class BinanceFetcher:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         # rebuild close_time as Series aligned to df
         close_times = pd.to_datetime(
-            [int(r[6]) for r in all_rows], unit="ms", utc=True
+            [int(r[6]) for r in all_rows], unit="ms"
         )
         ct_series = pd.Series(close_times.values, index=df.index)
-        df = df[ct_series < pd.Timestamp.now(tz="UTC")]
+        df = df[ct_series < pd.Timestamp.now()]
 
         return df.iloc[-bars:]  # cap to requested count
 

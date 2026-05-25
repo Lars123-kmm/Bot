@@ -60,14 +60,14 @@ ml:
   # Walk-Forward
   train_bars: 2000             # ~83 Tage bei H1
   test_bars: 500               # ~21 Tage
-  step_bars: 250
+  step_bars: 100
   purge_bars: 48               # Gap zwischen Train/Test (verhindert Leakage)
 
   # LightGBM (Startparameter, werden durch Optuna optimiert)
   lgbm_num_leaves: 50
   lgbm_learning_rate: 0.05
   lgbm_n_estimators: 200
-  lgbm_min_child_samples: 20
+  lgbm_min_child_samples: 3
 
 # ---- Regime-Erkennung ----
 regime:

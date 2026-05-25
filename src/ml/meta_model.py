@@ -115,8 +115,9 @@ class MetaModel:
 
         # Trainings-Metriken
         probas = self._model.predict_proba(X_scaled)[:, 1]
+        auc = float(roc_auc_score(y, probas)) if y.nunique() > 1 else 0.5
         self.train_metrics_ = {
-            "auc": round(float(roc_auc_score(y, probas)), 4),
+            "auc": round(auc, 4),
             "brier_score": round(float(brier_score_loss(y, probas)), 4),
             "n_samples": len(y),
             "positive_rate": round(float(y.mean()), 4),
