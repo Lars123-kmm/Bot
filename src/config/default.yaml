@@ -12,15 +12,15 @@ strategy:
   ema_fast: 20
   ema_slow: 50
   adx_period: 14
-  adx_threshold: 25          # ADX > 25 = aktiver Trend
+  adx_threshold: 20          # ADX > 20 = Trend vorhanden
   rsi_period: 14
-  rsi_long_min: 40
-  rsi_long_max: 65
-  rsi_short_min: 35
-  rsi_short_max: 60
+  rsi_long_min: 35
+  rsi_long_max: 70
+  rsi_short_min: 30
+  rsi_short_max: 65
   volume_ma_period: 20
-  volume_ratio_min: 1.2      # Vol > 1.2x MA(20)
-  extended_max_pct: 3.0      # Long: Preis < 3% über EMA(20)
+  volume_ratio_min: 1.0      # Normales Volumen reicht
+  extended_max_pct: 5.0      # Long: Preis < 5% über EMA(20)
   atr_period: 14
   atr_stop_mult: 2.0         # SL = Entry +/- 2*ATR
   atr_tp_mult: 3.0           # TP = Entry +/- 3*ATR

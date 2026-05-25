@@ -69,7 +69,7 @@ def compute_sample_weights(
     weights = uniq.copy()
     if "return_pct" in labels_df.columns:
         ret_abs = labels_df["return_pct"].abs().reindex(uniq.index).fillna(0.0)
-        weights = uniq * (1.0 + ret_abs / ret_abs.max().clip(min=1e-8))
+        weights = uniq * (1.0 + ret_abs / max(float(ret_abs.max()), 1e-8))
 
     weights = weights.fillna(1.0).clip(lower=1e-4)
     mean_w = weights.mean()
